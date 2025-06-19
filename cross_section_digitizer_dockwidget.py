@@ -23,28 +23,588 @@
 """
 
 import os
-
+import csv
 from qgis.PyQt import QtGui, QtWidgets, uic
-from qgis.PyQt.QtCore import pyqtSignal
+from qgis.PyQt.QtCore import pyqtSignal, QPoint, Qt
+from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox
+from qgis.core import (QgsProject, QgsVectorLayer, QgsFeature, QgsGeometry, 
+                       QgsPointXY, QgsField, QgsFields, QgsCoordinateReferenceSystem,
+                       QgsWkbTypes, QgsMapLayer)
+from qgis.PyQt.QtCore import QVariant
+from qgis.gui import QgsMapToolEmitPoint, QgsVertexMarker
+from .map_tools import PointMarkerManager
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'cross_section_digitizer_dockwidget_base.ui'))
+
+
+class ImageClickTool(QgsMapToolEmitPoint):
+    """Custom map tool for clicking on raster images"""
+    def __init__(self, canvas, callback):
+        super().__init__(canvas)
+        self.callback = callback
+        self.canvasClicked.connect(self.canvas_clicked)
+    
+    def canvas_clicked(self, point, button):
+        if button == Qt.LeftButton:
+            self.callback(point)
 
 
 class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
 
     closingPlugin = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, iface, parent=None):
         """Constructor."""
         super(CrossSectionDigitizerDockWidget, self).__init__(parent)
-        # Set up the user interface from Designer.
-        # After setupUI you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://doc.qt.io/qt-5/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
+        self.iface = iface
         self.setupUi(self)
+        
+        # Initialize variables
+        self.image_layer = None
+        self.reference_points = {}  # {origin: (pixel_x, pixel_y), x_ref: (pixel_x, pixel_y), y_ref: (pixel_x, pixel_y)}
+        self.plot_georef_points = {}  # {start_plot: (plot_x, plot_y), end_plot: (plot_x, plot_y)}
+        self.data_series = {}  # {series_name: [(x, y), ...]}
+        self.current_series = None
+        self.digitizing_mode = None  # 'origin', 'x_ref', 'y_ref', 'points', 'start_plot', 'end_plot'
+        self.click_tool = None
+        
+        # Initialize marker manager
+        self.marker_manager = PointMarkerManager(self.iface.mapCanvas())
+        
+        # Connect signals
+        self.setup_connections()
+        
+    def setup_connections(self):
+        """Connect UI signals to methods"""
+        # Image tab
+        self.btn_load_image.clicked.connect(self.load_image)
+        self.btn_set_origin.clicked.connect(lambda: self.start_reference_mode('origin'))
+        self.btn_set_x_ref.clicked.connect(lambda: self.start_reference_mode('x_ref'))
+        self.btn_set_y_ref.clicked.connect(lambda: self.start_reference_mode('y_ref'))
+        self.btn_clear_reference.clicked.connect(self.clear_reference_points)
+        
+        # Digitize tab
+        self.btn_new_series.clicked.connect(self.create_new_series)
+        self.combo_series.currentTextChanged.connect(self.select_series)
+        self.btn_digitize_points.clicked.connect(self.start_digitizing_points)
+        self.btn_delete_point.clicked.connect(self.delete_selected_point)
+        self.btn_save_series.clicked.connect(self.save_series_to_file)
+        
+        # Georeference tab
+        self.btn_set_start_plot.clicked.connect(lambda: self.start_plot_georef_mode('start_plot'))
+        self.btn_set_end_plot.clicked.connect(lambda: self.start_plot_georef_mode('end_plot'))
+        self.btn_clear_plot_points.clicked.connect(self.clear_plot_georef_points)
+        self.btn_create_polygon.clicked.connect(self.create_georeferenced_polygon)
+        self.btn_georeference_points.clicked.connect(self.georeference_digitized_points)
+        
+    def load_image(self):
+        """Load raster image for digitizing"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Load Image", "", 
+            "Image Files (*.png *.jpg *.jpeg *.tif *.tiff *.bmp)")
+        
+        if file_path:
+            # Add raster layer to QGIS
+            layer_name = os.path.basename(file_path)
+            self.image_layer = self.iface.addRasterLayer(file_path, layer_name)
+            
+            if self.image_layer.isValid():
+                self.label_image_path.setText(f"Loaded: {layer_name}")
+                # Zoom to layer extent
+                self.iface.mapCanvas().setExtent(self.image_layer.extent())
+                self.iface.mapCanvas().refresh()
+            else:
+                QMessageBox.warning(self, "Error", "Failed to load image")
+                
+    def start_reference_mode(self, mode):
+        """Start reference point selection mode"""
+        if not self.image_layer:
+            QMessageBox.warning(self, "Error", "Please load an image first")
+            return
+            
+        self.digitizing_mode = mode
+        self.setup_click_tool()
+        
+        mode_names = {'origin': 'origin point', 'x_ref': 'X reference point', 'y_ref': 'Y reference point'}
+        self.iface.messageBar().pushMessage(
+            "CrossSectionDigitizer", 
+            f"Click on the image to set the {mode_names[mode]}", 
+            level=0, duration=3)
+            
+    def start_plot_georef_mode(self, mode):
+        """Start plot georeferencing point selection mode"""
+        if not self.image_layer:
+            QMessageBox.warning(self, "Error", "Please load an image first")
+            return
+            
+        if len(self.reference_points) < 3:
+            QMessageBox.warning(self, "Error", "Please set all reference points first")
+            return
+            
+        self.digitizing_mode = mode
+        self.setup_click_tool()
+        
+        mode_names = {'start_plot': 'start point', 'end_plot': 'end point'}
+        self.iface.messageBar().pushMessage(
+            "CrossSectionDigitizer", 
+            f"Click on the plot to set the cross-section {mode_names[mode]}", 
+            level=0, duration=3)
+            
+    def clear_plot_georef_points(self):
+        """Clear plot georeferencing points"""
+        self.plot_georef_points.clear()
+        self.marker_manager.clear_georef_points()
+        self.spin_start_plot_x.setValue(0)
+        self.spin_start_plot_y.setValue(0)
+        self.spin_end_plot_x.setValue(0)
+        self.spin_end_plot_y.setValue(0)
+        self.iface.messageBar().pushMessage(
+            "CrossSectionDigitizer", "Plot georeferencing points cleared", level=0, duration=2)
+            
+    def setup_click_tool(self):
+        """Setup the map click tool"""
+        if self.click_tool:
+            self.click_tool.deactivate()
+        self.click_tool = ImageClickTool(self.iface.mapCanvas(), self.handle_canvas_click)
+        self.iface.mapCanvas().setMapTool(self.click_tool)
+        
+    def handle_canvas_click(self, point):
+        """Handle clicks on the map canvas"""
+        if self.digitizing_mode in ['origin', 'x_ref', 'y_ref']:
+            self.reference_points[self.digitizing_mode] = (point.x(), point.y())
+            
+            # Add visual marker for reference point
+            self.marker_manager.add_reference_point(point, self.digitizing_mode)
+            
+            mode_messages = {
+                'origin': f"Origin set at pixel ({point.x():.1f}, {point.y():.1f})",
+                'x_ref': f"X reference set at pixel ({point.x():.1f}, {point.y():.1f})",
+                'y_ref': f"Y reference set at pixel ({point.x():.1f}, {point.y():.1f})"
+            }
+            
+            self.iface.messageBar().pushMessage(
+                "CrossSectionDigitizer", 
+                mode_messages[self.digitizing_mode], 
+                level=0, duration=2)
+                
+            self.digitizing_mode = None
+            
+        elif self.digitizing_mode in ['start_plot', 'end_plot']:
+            # Convert pixel coordinates to plot coordinates
+            plot_coords = self.pixel_to_plot_coords(point.x(), point.y())
+            if plot_coords:
+                self.plot_georef_points[self.digitizing_mode] = plot_coords
+                
+                # Add visual marker for georeferencing point (red)
+                self.marker_manager.add_georef_point(point, self.digitizing_mode)
+                
+                # Update the appropriate spinboxes
+                if self.digitizing_mode == 'start_plot':
+                    self.spin_start_plot_x.setValue(plot_coords[0])
+                    self.spin_start_plot_y.setValue(plot_coords[1])
+                    point_name = "start"
+                else:  # end_plot
+                    self.spin_end_plot_x.setValue(plot_coords[0])
+                    self.spin_end_plot_y.setValue(plot_coords[1])
+                    point_name = "end"
+                    
+                self.iface.messageBar().pushMessage(
+                    "CrossSectionDigitizer", 
+                    f"Cross-section {point_name} point set at ({plot_coords[0]:.3f}, {plot_coords[1]:.3f})", 
+                    level=0, duration=2)
+                    
+                self.digitizing_mode = None
+            
+        elif self.digitizing_mode == 'points' and self.current_series:
+            # Convert pixel coordinates to plot coordinates
+            plot_coords = self.pixel_to_plot_coords(point.x(), point.y())
+            if plot_coords:
+                self.data_series[self.current_series].append(plot_coords)
+                
+                # Add visual marker for data point (black if active, gray if inactive)
+                is_active = True  # Current series is always active when digitizing
+                self.marker_manager.add_data_point(self.current_series, point, is_active)
+                
+                self.update_points_list()
+                
+    def pixel_to_plot_coords(self, pixel_x, pixel_y):
+        """Convert pixel coordinates to plot coordinates using reference points"""
+        if len(self.reference_points) < 3:
+            QMessageBox.warning(self, "Error", "Please set all three reference points first")
+            return None
+            
+        origin_px, origin_py = self.reference_points['origin']
+        x_ref_px, x_ref_py = self.reference_points['x_ref']
+        y_ref_px, y_ref_py = self.reference_points['y_ref']
+        
+        # Get reference values from spinboxes
+        origin_x = self.spin_origin_x.value()
+        origin_y = self.spin_origin_y.value()
+        x_ref_val = self.spin_x_ref.value()
+        y_ref_val = self.spin_y_ref.value()
+        
+        # Calculate scale factors
+        x_scale = (x_ref_val - origin_x) / (x_ref_px - origin_px) if x_ref_px != origin_px else 1
+        y_scale = (y_ref_val - origin_y) / (y_ref_py - origin_py) if y_ref_py != origin_py else 1
+        
+        # Transform pixel coordinates to plot coordinates
+        plot_x = origin_x + (pixel_x - origin_px) * x_scale
+        plot_y = origin_y + (pixel_y - origin_py) * y_scale
+        
+        return (plot_x, plot_y)
+        
+    def clear_reference_points(self):
+        """Clear all reference points"""
+        self.reference_points.clear()
+        self.marker_manager.clear_reference_points()
+        self.iface.messageBar().pushMessage(
+            "CrossSectionDigitizer", "Reference points cleared", level=0, duration=2)
+            
+    def create_new_series(self):
+        """Create a new data series"""
+        series_name = self.line_series_name.text().strip()
+        if not series_name:
+            QMessageBox.warning(self, "Error", "Please enter a series name")
+            return
+            
+        if series_name in self.data_series:
+            QMessageBox.warning(self, "Error", "Series name already exists")
+            return
+            
+        self.data_series[series_name] = []
+        self.combo_series.addItem(series_name)
+        self.combo_series.setCurrentText(series_name)
+        self.current_series = series_name
+        self.line_series_name.clear()
+        
+    def select_series(self, series_name):
+        """Select current data series"""
+        if series_name in self.data_series:
+            self.current_series = series_name
+            # Update marker colors based on active series
+            self.marker_manager.update_series_colors(series_name)
+            self.update_points_list()
+            
+    def start_digitizing_points(self):
+        """Start digitizing points mode"""
+        if not self.current_series:
+            QMessageBox.warning(self, "Error", "Please create or select a data series first")
+            return
+            
+        if len(self.reference_points) < 3:
+            QMessageBox.warning(self, "Error", "Please set all reference points first")
+            return
+            
+        self.digitizing_mode = 'points'
+        self.setup_click_tool()
+        self.iface.messageBar().pushMessage(
+            "CrossSectionDigitizer", 
+            "Click on points to digitize. Press Escape to stop digitizing.", 
+            level=0, duration=5)
+            
+    def update_points_list(self):
+        """Update the points list widget"""
+        self.list_points.clear()
+        if self.current_series and self.current_series in self.data_series:
+            for i, (x, y) in enumerate(self.data_series[self.current_series]):
+                self.list_points.addItem(f"Point {i+1}: ({x:.3f}, {y:.3f})")
+                
+    def delete_selected_point(self):
+        """Delete selected point from current series"""
+        if not self.current_series or self.current_series not in self.data_series:
+            return
+            
+        current_row = self.list_points.currentRow()
+        if current_row >= 0:
+            del self.data_series[self.current_series][current_row]
+            
+            # Clear and recreate markers for this series
+            self.marker_manager.clear_series(self.current_series)
+            self.recreate_series_markers(self.current_series)
+            
+            self.update_points_list()
+            
+    def recreate_series_markers(self, series_name):
+        """Recreate visual markers for a data series"""
+        if series_name not in self.data_series:
+            return
+            
+        is_active = (series_name == self.current_series)
+        
+        for plot_x, plot_y in self.data_series[series_name]:
+            # Convert plot coordinates back to pixel coordinates for marker placement
+            # This is an approximation - you might want to store pixel coords separately
+            if len(self.reference_points) >= 3:
+                pixel_point = self.plot_to_pixel_coords(plot_x, plot_y)
+                if pixel_point:
+                    point = QgsPointXY(pixel_point[0], pixel_point[1])
+                    self.marker_manager.add_data_point(series_name, point, is_active)
+                    
+    def plot_to_pixel_coords(self, plot_x, plot_y):
+        """Convert plot coordinates back to pixel coordinates (reverse transformation)"""
+        if len(self.reference_points) < 3:
+            return None
+            
+        origin_px, origin_py = self.reference_points['origin']
+        x_ref_px, x_ref_py = self.reference_points['x_ref']
+        y_ref_px, y_ref_py = self.reference_points['y_ref']
+        
+        # Get reference values from spinboxes
+        origin_x = self.spin_origin_x.value()
+        origin_y = self.spin_origin_y.value()
+        x_ref_val = self.spin_x_ref.value()
+        y_ref_val = self.spin_y_ref.value()
+        
+        # Calculate scale factors
+        x_scale = (x_ref_val - origin_x) / (x_ref_px - origin_px) if x_ref_px != origin_px else 1
+        y_scale = (y_ref_val - origin_y) / (y_ref_py - origin_py) if y_ref_py != origin_py else 1
+        
+        # Reverse transform plot coordinates to pixel coordinates
+        if x_scale != 0 and y_scale != 0:
+            pixel_x = origin_px + (plot_x - origin_x) / x_scale
+            pixel_y = origin_py + (plot_y - origin_y) / y_scale
+            return (pixel_x, pixel_y)
+        return None
+            
+    def save_series_to_file(self):
+        """Save current series to CSV file"""
+        if not self.current_series or not self.data_series[self.current_series]:
+            QMessageBox.warning(self, "Error", "No data to save")
+            return
+            
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Series", f"{self.current_series}.csv", "CSV Files (*.csv)")
+            
+        if file_path:
+            with open(file_path, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['X', 'Y'])
+                for x, y in self.data_series[self.current_series]:
+                    writer.writerow([x, y])
+            QMessageBox.information(self, "Success", f"Series saved to {file_path}")
+            
+    def create_georeferenced_polygon(self):
+        """Create georeferenced polygon representing the cross-section"""
+        if not self.image_layer:
+            QMessageBox.warning(self, "Error", "Please load an image first")
+            return
+            
+        # Check if plot coordinates are set
+        if 'start_plot' not in self.plot_georef_points or 'end_plot' not in self.plot_georef_points:
+            QMessageBox.warning(self, "Error", "Please set start and end points on the plot first")
+            return
+            
+        # Get georeferencing points
+        start_lon = self.spin_start_lon.value()
+        start_lat = self.spin_start_lat.value()
+        start_elev = self.spin_start_elev.value()
+        end_lon = self.spin_end_lon.value()
+        end_lat = self.spin_end_lat.value()
+        end_elev = self.spin_end_elev.value()
+        
+        if start_lon == 0 and start_lat == 0 and end_lon == 0 and end_lat == 0:
+            QMessageBox.warning(self, "Error", "Please set georeferencing coordinates")
+            return
+            
+        # Get plot coordinates
+        start_plot_x, start_plot_y = self.plot_georef_points['start_plot']
+        end_plot_x, end_plot_y = self.plot_georef_points['end_plot']
+        
+        # Create polygon layer
+        layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "Cross_Section_Polygon", "memory")
+        provider = layer.dataProvider()
+        
+        # Add fields
+        fields = QgsFields()
+        fields.append(QgsField("name", QVariant.String))
+        fields.append(QgsField("start_lon", QVariant.Double))
+        fields.append(QgsField("start_lat", QVariant.Double))
+        fields.append(QgsField("start_elev", QVariant.Double))
+        fields.append(QgsField("end_lon", QVariant.Double))
+        fields.append(QgsField("end_lat", QVariant.Double))
+        fields.append(QgsField("end_elev", QVariant.Double))
+        fields.append(QgsField("start_plot_x", QVariant.Double))
+        fields.append(QgsField("start_plot_y", QVariant.Double))
+        fields.append(QgsField("end_plot_x", QVariant.Double))
+        fields.append(QgsField("end_plot_y", QVariant.Double))
+        provider.addAttributes(fields)
+        layer.updateFields()
+        
+        # Create rectangle polygon around image extent
+        extent = self.image_layer.extent()
+        points = [
+            QgsPointXY(extent.xMinimum(), extent.yMinimum()),
+            QgsPointXY(extent.xMaximum(), extent.yMinimum()),
+            QgsPointXY(extent.xMaximum(), extent.yMaximum()),
+            QgsPointXY(extent.xMinimum(), extent.yMaximum())
+        ]
+        
+        # Create feature
+        feature = QgsFeature()
+        feature.setGeometry(QgsGeometry.fromPolygonXY([points]))
+        feature.setAttributes([
+            "Cross_Section", start_lon, start_lat, start_elev, 
+            end_lon, end_lat, end_elev,
+            start_plot_x, start_plot_y, end_plot_x, end_plot_y
+        ])
+        
+        provider.addFeatures([feature])
+        layer.updateExtents()
+        
+        # Add to project
+        QgsProject.instance().addMapLayer(layer)
+        QMessageBox.information(self, "Success", "Georeferenced polygon created")
+        
+    def georeference_digitized_points(self):
+        """Georeference all digitized data series"""
+        if not self.data_series:
+            QMessageBox.warning(self, "Error", "No digitized data available")
+            return
+            
+        # Check if plot coordinates are set
+        if 'start_plot' not in self.plot_georef_points or 'end_plot' not in self.plot_georef_points:
+            QMessageBox.warning(self, "Error", "Please set start and end points on the plot first")
+            return
+            
+        # Get georeferencing parameters
+        start_lon = self.spin_start_lon.value()
+        start_lat = self.spin_start_lat.value()
+        start_elev = self.spin_start_elev.value()
+        end_lon = self.spin_end_lon.value()
+        end_lat = self.spin_end_lat.value()
+        end_elev = self.spin_end_elev.value()
+        
+        if start_lon == 0 and start_lat == 0 and end_lon == 0 and end_lat == 0:
+            QMessageBox.warning(self, "Error", "Please set georeferencing coordinates")
+            return
+            
+        # Get plot coordinates of georeferencing points
+        start_plot_x, start_plot_y = self.plot_georef_points['start_plot']
+        end_plot_x, end_plot_y = self.plot_georef_points['end_plot']
+        
+        # Create point layer for each series
+        for series_name, points in self.data_series.items():
+            if not points:
+                continue
+                
+            # Create point layer
+            layer = QgsVectorLayer("Point?crs=EPSG:4326", f"Georeferenced_{series_name}", "memory")
+            provider = layer.dataProvider()
+            
+            # Add fields
+            fields = QgsFields()
+            fields.append(QgsField("series", QVariant.String))
+            fields.append(QgsField("point_id", QVariant.Int))
+            fields.append(QgsField("plot_x", QVariant.Double))
+            fields.append(QgsField("plot_y", QVariant.Double))
+            fields.append(QgsField("distance_along_section", QVariant.Double))
+            fields.append(QgsField("depth_elevation", QVariant.Double))
+            fields.append(QgsField("longitude", QVariant.Double))
+            fields.append(QgsField("latitude", QVariant.Double))
+            fields.append(QgsField("elevation", QVariant.Double))
+            provider.addAttributes(fields)
+            layer.updateFields()
+            
+            features = []
+            for i, (plot_x, plot_y) in enumerate(points):
+                # Calculate distance along section and depth/elevation relative to start point
+                distance_along = plot_x - start_plot_x  # assuming x is distance along section
+                depth_elev = plot_y - start_plot_y      # assuming y is depth/elevation
+                
+                # Use your georeferencing function here
+                georef_points = self.project_x_sec_pts_to_geog(
+                    [distance_along], [depth_elev], 
+                    (start_lon, start_lat, start_elev),
+                    (end_lon, end_lat, end_elev)
+                )
+                
+                if georef_points:
+                    lon, lat, elev = georef_points[0]
+                    
+                    feature = QgsFeature()
+                    feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(lon, lat)))
+                    feature.setAttributes([
+                        series_name, i+1, plot_x, plot_y, distance_along, depth_elev, lon, lat, elev
+                    ])
+                    features.append(feature)
+            
+            if features:
+                provider.addFeatures(features)
+                layer.updateExtents()
+                QgsProject.instance().addMapLayer(layer)
+        
+        QMessageBox.information(self, "Success", "Digitized points georeferenced and added to project")
+        
+    def project_x_sec_pts_to_geog(self, xs, zs, start_pt, end_pt, z_unit='km', depth_pos=True):
+        """
+        Project cross-section points to geographic coordinates
+        This is a placeholder - replace with your actual transformation function
+        
+        Args:
+            xs: list of x coordinates (distance along cross-section)
+            zs: list of z coordinates (depth/elevation)
+            start_pt: tuple (lon, lat, elev) of start point
+            end_pt: tuple (lon, lat, elev) of end point
+            z_unit: unit for z coordinates ('km' or 'm')
+            depth_pos: True if positive z is depth, False if positive z is elevation
+            
+        Returns:
+            list of tuples [(lon, lat, elev), ...]
+        """
+        # PLACEHOLDER IMPLEMENTATION
+        # Replace this with your actual georeferencing transformation
+        
+        import math
+        
+        start_lon, start_lat, start_elev = start_pt
+        end_lon, end_lat, end_elev = end_pt
+        
+        # Calculate total distance between start and end points (simplified)
+        dlat = math.radians(end_lat - start_lat)
+        dlon = math.radians(end_lon - start_lon)
+        lat1 = math.radians(start_lat)
+        lat2 = math.radians(end_lat)
+        
+        a = (math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2)
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        total_distance = 6371000 * c  # Earth radius in meters
+        
+        results = []
+        for x, z in zip(xs, zs):
+            # Linear interpolation along the cross-section line
+            if total_distance > 0:
+                ratio = x / total_distance if total_distance > 0 else 0
+            else:
+                ratio = 0
+                
+            # Interpolate coordinates
+            interp_lat = start_lat + ratio * (end_lat - start_lat)
+            interp_lon = start_lon + ratio * (end_lon - start_lon)
+            
+            # Handle elevation/depth
+            if z_unit == 'km':
+                z_meters = z * 1000
+            else:
+                z_meters = z
+                
+            if depth_pos:
+                # z is depth below surface
+                surface_elev = start_elev + ratio * (end_elev - start_elev)
+                final_elev = surface_elev - z_meters
+            else:
+                # z is elevation
+                final_elev = z_meters
+                
+            results.append((interp_lon, interp_lat, final_elev))
+            
+        return results
 
     def closeEvent(self, event):
+        """Handle widget close event"""
+        if self.click_tool:
+            self.click_tool.deactivate()
+        # Clear all markers when closing
+        self.marker_manager.clear_all()
         self.closingPlugin.emit()
         event.accept()

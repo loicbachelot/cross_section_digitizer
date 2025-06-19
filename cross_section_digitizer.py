@@ -64,15 +64,13 @@ class CrossSectionDigitizer:
         # Declare instance attributes
         self.actions = []
         self.menu = self.tr(u'&CrossSectionDigitizer')
-        # TODO: We are going to let the user set this up in a future iteration
+        
+        # Check if plugin should be enabled in toolbars menu
         self.toolbar = self.iface.addToolBar(u'CrossSectionDigitizer')
         self.toolbar.setObjectName(u'CrossSectionDigitizer')
 
-        #print "** INITIALIZING CrossSectionDigitizer"
-
         self.pluginIsActive = False
         self.dockwidget = None
-
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -88,7 +86,6 @@ class CrossSectionDigitizer:
         """
         # noinspection PyTypeChecker,PyArgumentList,PyCallByClass
         return QCoreApplication.translate('CrossSectionDigitizer', message)
-
 
     def add_action(
         self,
@@ -152,7 +149,8 @@ class CrossSectionDigitizer:
             action.setWhatsThis(whats_this)
 
         if add_to_toolbar:
-            self.toolbar.addAction(action)
+            # Adds plugin icon to Plugins toolbar
+            self.iface.addToolBarIcon(action)
 
         if add_to_menu:
             self.iface.addPluginToMenu(
@@ -163,40 +161,26 @@ class CrossSectionDigitizer:
 
         return action
 
-
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
 
         icon_path = ':/plugins/cross_section_digitizer/icon.png'
         self.add_action(
             icon_path,
-            text=self.tr(u'CrossSectionDigitizer'),
+            text=self.tr(u'Cross Section Digitizer'),
             callback=self.run,
             parent=self.iface.mainWindow())
-
-    #--------------------------------------------------------------------------
 
     def onClosePlugin(self):
         """Cleanup necessary items here when plugin dockwidget is closed"""
 
-        #print "** CLOSING CrossSectionDigitizer"
-
         # disconnects
         self.dockwidget.closingPlugin.disconnect(self.onClosePlugin)
 
-        # remove this statement if dockwidget is to remain
-        # for reuse if plugin is reopened
-        # Commented next statement since it causes QGIS crashe
-        # when closing the docked window:
-        # self.dockwidget = None
-
         self.pluginIsActive = False
-
 
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
-
-        #print "** UNLOAD CrossSectionDigitizer"
 
         for action in self.actions:
             self.iface.removePluginMenu(
@@ -206,27 +190,28 @@ class CrossSectionDigitizer:
         # remove the toolbar
         del self.toolbar
 
-    #--------------------------------------------------------------------------
-
     def run(self):
         """Run method that loads and starts the plugin"""
 
         if not self.pluginIsActive:
             self.pluginIsActive = True
 
-            #print "** STARTING CrossSectionDigitizer"
-
             # dockwidget may not exist if:
             #    first run of plugin
             #    removed on close (see self.onClosePlugin method)
             if self.dockwidget == None:
                 # Create the dockwidget (after translation) and keep reference
-                self.dockwidget = CrossSectionDigitizerDockWidget()
+                self.dockwidget = CrossSectionDigitizerDockWidget(self.iface)
 
             # connect to provide cleanup on closing of dockwidget
             self.dockwidget.closingPlugin.connect(self.onClosePlugin)
 
             # show the dockwidget
-            # TODO: fix to allow choice of dock location
             self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dockwidget)
             self.dockwidget.show()
+        else:
+            # Toggle visibility if already active
+            if self.dockwidget.isVisible():
+                self.dockwidget.hide()
+            else:
+                self.dockwidget.show()
