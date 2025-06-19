@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/cross_section_digitizer" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>
