@@ -394,11 +394,11 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
     def validate_reference_points(self):
         """Validate that all reference points and values are set"""
         missing = []
-        
+
         # Check if image is loaded
         if not self.image_path:
             missing.append("- No image loaded")
-            
+
         # Check reference points
         if 'origin' not in self.reference_points:
             missing.append("- Origin point not set (click 'Set Origin' button)")
@@ -406,21 +406,21 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             # Check origin values
             if self.spin_origin_x.value() == 0 and self.spin_origin_y.value() == 0:
                 missing.append("- Origin X,Y values not set (enter values in spinboxes)")
-                
+
         if 'x_ref' not in self.reference_points:
             missing.append("- X reference point not set (click 'Set X Reference Point' button)")
         else:
             # Check X reference value
             if self.spin_x_ref.value() == 0:
                 missing.append("- X reference value not set (enter value in spinbox)")
-                
+
         if 'y_ref' not in self.reference_points:
             missing.append("- Y reference point not set (click 'Set Y Reference Point' button)")
         else:
             # Check Y reference value  
             if self.spin_y_ref.value() == 0:
                 missing.append("- Y reference value not set (enter value in spinbox)")
-        
+
         # Show results
         if missing:
             msg = "Reference points validation failed. Missing:\n\n" + "\n".join(missing)
@@ -431,12 +431,12 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                 origin = self.reference_points['origin']
                 x_ref = self.reference_points['x_ref']
                 y_ref = self.reference_points['y_ref']
-                
+
                 # Check if points form a valid coordinate system
                 # Calculate vectors
                 vx = (x_ref[0] - origin[0], x_ref[1] - origin[1])
                 vy = (y_ref[0] - origin[0], y_ref[1] - origin[1])
-                
+
                 # Check if vectors are too parallel (cross product close to zero)
                 cross = abs(vx[0] * vy[1] - vx[1] * vy[0])
                 if cross < 10:  # threshold in pixels
@@ -451,21 +451,21 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                         "All reference points and values are properly set!\n"
                         "You can now proceed to digitize points.\n"
                         "Plot coordinates will now be displayed in the status bar.")
-    
+
     def clear_reference_points(self):
         """Clear all reference points"""
         self.reference_points.clear()
         self.image_viewer.clear_reference_markers()
-        
+
         # Disable coordinate transformation
         self.image_viewer.set_coordinate_transform_callback(None)
-        
+
         # Reset spinbox values to 0
         self.spin_origin_x.setValue(0)
         self.spin_origin_y.setValue(0)
         self.spin_x_ref.setValue(0)
         self.spin_y_ref.setValue(0)
-        
+
         self.iface.messageBar().pushMessage(
             "CrossSectionDigitizer", "Reference points cleared", level=0, duration=2)
             
@@ -625,8 +625,6 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         )
 
         ul_geog, ur_geog, ll_geog, lr_geog = geog_coords
-        QMessageBox.information(self, "Success", f"x-sec corners: {geog_coords}")
-
         
         # Create polygon layer
         layer = QgsVectorLayer("PolygonZ?crs=EPSG:4326", "Cross_Section_Polygon", "memory")
@@ -650,23 +648,23 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         ]
 
         # create point layer for debugging
-        pt_layer = QgsVectorLayer("PointZ?crs=EPSG:4326", "Image Corners", "memory")
-        pt_provider = pt_layer.dataProvider()
-        pt_fields = QgsFields()
-        pt_fields.append(QgsField("position", QVariant.String))
-        pt_provider.addAttributes(pt_fields)
-        pt_layer.updateFields()
+        #pt_layer = QgsVectorLayer("PointZ?crs=EPSG:4326", "Image Corners", "memory")
+        #pt_provider = pt_layer.dataProvider()
+        #pt_fields = QgsFields()
+        #pt_fields.append(QgsField("position", QVariant.String))
+        #pt_provider.addAttributes(pt_fields)
+        #pt_layer.updateFields()
 
-        field_names = ["ul", "ur", "lr", "ll"]
-        for i, pt in enumerate(rect_points[:4]):
-            pt_ft = QgsFeature()
-            pt_ft.setGeometry(QgsGeometry.fromPoint(pt))
-            pt_ft.setAttributes(["position", field_names[i]])
-            pt_provider.addFeatures([pt_ft])
-            pt_layer.updateExtents()
-            QMessageBox.information(self, "Success", f"{field_names[i]}, {pt_ft.geometry().asWkt()}")
+        #field_names = ["ul", "ur", "lr", "ll"]
+        #for i, pt in enumerate(rect_points[:4]):
+        #    pt_ft = QgsFeature()
+        #    pt_ft.setGeometry(QgsGeometry.fromPoint(pt))
+        #    pt_ft.setAttributes(["position", field_names[i]])
+        #    pt_provider.addFeatures([pt_ft])
+        #    pt_layer.updateExtents()
+        #    QMessageBox.information(self, "Success", f"{field_names[i]}, {pt_ft.geometry().asWkt()}")
 
-        QgsProject.instance().addMapLayer(pt_layer)
+        #QgsProject.instance().addMapLayer(pt_layer)
         
         
         # Create feature
