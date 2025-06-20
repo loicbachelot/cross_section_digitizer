@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>300</width>
-    <height>600</height>
+    <width>350</width>
+    <height>700</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -43,6 +43,9 @@
              <property name="text">
               <string>No image loaded</string>
              </property>
+             <property name="wordWrap">
+              <bool>true</bool>
+             </property>
             </widget>
            </item>
           </layout>
@@ -54,6 +57,16 @@
            <string>Plot Coordinate Reference</string>
           </property>
           <layout class="QVBoxLayout" name="verticalLayout_4">
+           <item>
+            <widget class="QLabel" name="label_ref_instructions">
+             <property name="text">
+              <string>Set three reference points to calibrate the coordinate system:</string>
+             </property>
+             <property name="wordWrap">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
            <item>
             <widget class="QPushButton" name="btn_set_origin">
              <property name="text">
@@ -168,11 +181,22 @@
             </layout>
            </item>
            <item>
-            <widget class="QPushButton" name="btn_clear_reference">
-             <property name="text">
-              <string>Clear Reference Points</string>
-             </property>
-            </widget>
+            <layout class="QHBoxLayout" name="horizontalLayout_validate">
+             <item>
+              <widget class="QPushButton" name="btn_validate_reference">
+               <property name="text">
+                <string>Validate</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btn_clear_reference">
+               <property name="text">
+                <string>Clear Reference Points</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
            </item>
           </layout>
          </widget>
@@ -229,6 +253,9 @@
              <property name="text">
               <string>Start Digitizing Points</string>
              </property>
+             <property name="checkable">
+              <bool>true</bool>
+             </property>
             </widget>
            </item>
            <item>
@@ -253,6 +280,19 @@
             </layout>
            </item>
           </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="label_digitize_help">
+          <property name="text">
+           <string>Tip: Use the image viewer toolbar to zoom/pan. Hold middle mouse button to pan.</string>
+          </property>
+          <property name="wordWrap">
+           <bool>true</bool>
+          </property>
+          <property name="styleSheet">
+           <string>color: #666; font-style: italic;</string>
+          </property>
          </widget>
         </item>
         <item>
@@ -281,6 +321,16 @@
            <string>Cross-Section Plot Coordinates</string>
           </property>
           <layout class="QVBoxLayout" name="verticalLayout_8">
+           <item>
+            <widget class="QLabel" name="label_georef_instructions">
+             <property name="text">
+              <string>Click start and end points of the cross-section on the plot:</string>
+             </property>
+             <property name="wordWrap">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
            <item>
             <widget class="QPushButton" name="btn_set_start_plot">
              <property name="text">
