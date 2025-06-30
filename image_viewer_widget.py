@@ -4,13 +4,13 @@ Image viewer widget for cross-section digitizing
 Inspired by QGIS Georeferencer tool
 """
 
-from qgis.PyQt.QtCore import Qt, QPointF, QRectF, pyqtSignal, QSizeF, QSize
+from qgis.PyQt.QtCore import Qt, QPointF, QRectF, pyqtSignal, QSizeF, QSize, QSettings
 from qgis.PyQt.QtGui import (QPixmap, QPen, QBrush, QColor, QTransform, 
                             QWheelEvent, QPainter, QCursor, QIcon)
 from qgis.PyQt.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolBar,
                                 QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
                                 QAction, QLabel, QGraphicsEllipseItem, QGraphicsLineItem,
-                                QSizePolicy, QGraphicsItem)
+                                QSizePolicy, QGraphicsItem, QMenu, QColorDialog)
 import os
 
 
@@ -176,6 +176,16 @@ class ImageGraphicsView(QGraphicsView):
         else:
             super().mouseReleaseEvent(event)
             
+    def contextMenuEvent(self, event):
+        """Handle right-click context menu"""
+        if hasattr(self.parent(), 'show_marker_color_dialog'):
+            menu = QMenu(self)
+            color_action = menu.addAction("Change Marker Color...")
+            color_action.triggered.connect(self.parent().show_marker_color_dialog)
+            menu.exec_(event.globalPos())
+        else:
+            super().contextMenuEvent(event)
+            
     def set_pan_mode(self, enabled):
         """Enable/disable pan mode"""
         self.pan_mode = enabled
@@ -238,6 +248,12 @@ class ImageViewerWidget(QWidget):
         
         # Coordinate transformation callback
         self.coordinate_transform_callback = None
+        
+    def get_marker_color(self):
+        """Get the marker color from settings, with magenta as default"""
+        settings = QSettings()
+        color_str = settings.value('CrossSectionDigitizer/marker_color', '#FF00FF')  # Default magenta
+        return QColor(color_str)
         
     def setup_ui(self):
         """Setup the user interface"""
@@ -416,8 +432,8 @@ class ImageViewerWidget(QWidget):
         if series_name not in self.series_markers:
             self.series_markers[series_name] = []
             
-        # Color based on active state
-        color = QColor(0, 0, 0) if is_active else QColor(128, 128, 128)
+        # Color based on active state - configurable for active markers
+        color = self.get_marker_color() if is_active else QColor(128, 128, 128)
         
         # Create marker
         scene_pos = self.image_item.mapToScene(QPointF(x, y))
@@ -463,11 +479,29 @@ class ImageViewerWidget(QWidget):
         """Update marker colors based on active series"""
         for series_name, markers in self.series_markers.items():
             is_active = (series_name == active_series)
-            color = QColor(0, 0, 0) if is_active else QColor(128, 128, 128)
+            color = self.get_marker_color() if is_active else QColor(128, 128, 128)
             
             for marker in markers:
                 marker.color = color
                 marker.update()  # Trigger repaint
+
+    def show_marker_color_dialog(self):
+        """Show a color dialog to change marker color"""
+        current_color = self.get_marker_color()
+        color = QColorDialog.getColor(current_color, self, "Choose Marker Color")
+        
+        if color.isValid():
+            # Save the new color to settings
+            settings = QSettings()
+            settings.setValue('CrossSectionDigitizer/marker_color', color.name())
+            
+            # Update all existing active markers
+            for series_name, markers in self.series_markers.items():
+                # We'll need to know which series is active - for now update all
+                for marker in markers:
+                    if marker.color != QColor(128, 128, 128):  # Not inactive gray
+                        marker.color = color
+                        marker.update()
 
     def get_image_size(self):
         """Get the size of the loaded image in pixels"""
