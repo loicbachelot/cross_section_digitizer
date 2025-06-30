@@ -198,6 +198,24 @@
              </item>
             </layout>
            </item>
+           <item>
+            <layout class="QHBoxLayout" name="horizontalLayout_reference_io">
+             <item>
+              <widget class="QPushButton" name="btn_export_reference">
+               <property name="text">
+                <string>Export Georeference Info</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btn_import_reference">
+               <property name="text">
+                <string>Import Georeference Info</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
           </layout>
          </widget>
         </item>
@@ -560,6 +578,24 @@
               <string>Georeference Digitized Points</string>
              </property>
             </widget>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="horizontalLayout_georeference_io">
+             <item>
+              <widget class="QPushButton" name="btn_export_georeference">
+               <property name="text">
+                <string>Export Georeference Info</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btn_import_georeference">
+               <property name="text">
+                <string>Import Georeference Info</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
            </item>
           </layout>
          </widget>

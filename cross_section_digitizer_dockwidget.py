@@ -25,6 +25,7 @@
 import os
 import csv
 import math
+import json
 
 from qgis.PyQt import QtWidgets, uic
 from qgis.PyQt.QtCore import pyqtSignal, Qt, QPointF
@@ -188,6 +189,8 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.btn_set_y_ref.clicked.connect(lambda: self.start_reference_mode('y_ref'))
         self.btn_validate_reference.clicked.connect(self.validate_reference_points)
         self.btn_clear_reference.clicked.connect(self.clear_reference_points)
+        self.btn_export_reference.clicked.connect(self.export_georeference_info)
+        self.btn_import_reference.clicked.connect(self.import_georeference_info)
         
         # Digitize tab
         self.btn_new_series.clicked.connect(self.create_new_series)
@@ -202,6 +205,8 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.btn_clear_plot_points.clicked.connect(self.clear_plot_georef_points)
         self.btn_create_polygon.clicked.connect(self.create_georeferenced_polygon)
         self.btn_georeference_points.clicked.connect(self.georeference_digitized_points)
+        self.btn_export_georeference.clicked.connect(self.export_georeference_info)
+        self.btn_import_georeference.clicked.connect(self.import_georeference_info)
         
     def load_image(self):
         """Load raster image for digitizing"""
@@ -759,6 +764,187 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.image_viewer.clear_reference_markers()
         self.image_viewer.clear_series_markers()
         self.image_viewer.clear_georef_markers()
+
+    def export_georeference_info(self):
+        """Export all georeferencing information to JSON"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Georeference Info", "", "JSON Files (*.json);;All Files (*)"
+        )
+        if not filename:
+            return
+            
+        # Add .json extension if not present
+        if not filename.lower().endswith('.json'):
+            filename += '.json'
+            
+        try:
+            # Build export data with combined format
+            export_data = {
+                "type": "cross_section_georeference_info",
+                "version": "1.0",
+                "image_path": getattr(self, 'image_path', ""),
+                "reference_points": None,
+                "plot_coordinates": None,
+                "geographic_coordinates": None
+            }
+            
+            # Add reference points if they exist
+            if hasattr(self, 'reference_points') and self.reference_points:
+                reference_points = {}
+                for point_type, (pixel_x, pixel_y) in self.reference_points.items():
+                    point_data = {
+                        "pixel": [pixel_x, pixel_y]
+                    }
+                    
+                    # Add plot coordinates based on point type
+                    if point_type == 'origin':
+                        point_data["plot"] = [
+                            self.spin_origin_x.value(),
+                            self.spin_origin_y.value()
+                        ]
+                    elif point_type == 'x_ref':
+                        point_data["value"] = self.spin_x_ref.value()
+                    elif point_type == 'y_ref':
+                        point_data["value"] = self.spin_y_ref.value()
+                        
+                    reference_points[point_type] = point_data
+                
+                if reference_points:
+                    export_data["reference_points"] = reference_points
+            
+            # Add plot coordinates if they exist
+            if hasattr(self, 'plot_georef_points') and self.plot_georef_points:
+                plot_coordinates = {}
+                for point_type, (plot_x, plot_y) in self.plot_georef_points.items():
+                    plot_coordinates[point_type] = [plot_x, plot_y]
+                
+                if plot_coordinates:
+                    export_data["plot_coordinates"] = plot_coordinates
+            
+            # Add geographic coordinates (always include, even if zero)
+            export_data["geographic_coordinates"] = {
+                "start": {
+                    "longitude": self.spin_start_lon.value(),
+                    "latitude": self.spin_start_lat.value(),
+                    "elevation": self.spin_start_elev.value()
+                },
+                "end": {
+                    "longitude": self.spin_end_lon.value(),
+                    "latitude": self.spin_end_lat.value(),
+                    "elevation": self.spin_end_elev.value()
+                }
+            }
+            
+            # Write to file
+            with open(filename, 'w') as f:
+                json.dump(export_data, f, indent=2)
+                
+            QMessageBox.information(self, "Success", f"Georeference info exported to {filename}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to export georeference info: {str(e)}")
+
+    def import_georeference_info(self):
+        """Import all georeferencing information from JSON"""
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Import Georeference Info", "", "JSON Files (*.json);;All Files (*)"
+        )
+        if not filename:
+            return
+            
+        try:
+            with open(filename, 'r') as f:
+                data = json.load(f)
+                
+            # Validate format - accept both old and new formats
+            file_type = data.get("type", "")
+            if file_type not in ["cross_section_georeference_info", "cross_section_reference", "cross_section_georeference"]:
+                QMessageBox.warning(self, "Warning", "Invalid georeference info file format")
+                return
+            
+            imported_items = []
+            
+            # Import reference points if present
+            reference_points = data.get("reference_points", {})
+            if reference_points:
+                # Clear existing reference points
+                self.clear_reference_points()
+                
+                # Import reference points
+                for point_type, point_data in reference_points.items():
+                    if point_type in ['origin', 'x_ref', 'y_ref']:
+                        pixel_coords = point_data.get("pixel")
+                        if pixel_coords:
+                            # Store pixel coordinates
+                            self.reference_points[point_type] = tuple(pixel_coords)
+                            
+                            # Add marker to image viewer
+                            self.image_viewer.add_reference_marker(
+                                pixel_coords[0], pixel_coords[1], point_type
+                            )
+                            
+                            # Set plot coordinates in UI
+                            if point_type == 'origin' and "plot" in point_data:
+                                self.spin_origin_x.setValue(point_data["plot"][0])
+                                self.spin_origin_y.setValue(point_data["plot"][1])
+                            elif point_type == 'x_ref' and "value" in point_data:
+                                self.spin_x_ref.setValue(point_data["value"])
+                            elif point_type == 'y_ref' and "value" in point_data:
+                                self.spin_y_ref.setValue(point_data["value"])
+                
+                imported_items.append("reference points")
+            
+            # Import plot coordinates if present
+            plot_coords = data.get("plot_coordinates", {})
+            if plot_coords:
+                # Clear existing plot points
+                self.clear_plot_georef_points()
+                
+                # Import plot coordinates
+                for point_type, coords in plot_coords.items():
+                    if point_type in ['start_plot', 'end_plot'] and len(coords) == 2:
+                        if not hasattr(self, 'plot_georef_points'):
+                            self.plot_georef_points = {}
+                        self.plot_georef_points[point_type] = tuple(coords)
+                        
+                        # Add marker to image viewer  
+                        self.image_viewer.add_georef_marker(coords[0], coords[1])
+                        
+                        # Update UI spinboxes
+                        if point_type == 'start_plot':
+                            self.spin_start_plot_x.setValue(coords[0])
+                            self.spin_start_plot_y.setValue(coords[1])
+                        elif point_type == 'end_plot':
+                            self.spin_end_plot_x.setValue(coords[0])
+                            self.spin_end_plot_y.setValue(coords[1])
+                
+                imported_items.append("plot coordinates")
+            
+            # Import geographic coordinates if present
+            geo_coords = data.get("geographic_coordinates", {})
+            if geo_coords:
+                start_coords = geo_coords.get("start", {})
+                if start_coords:
+                    self.spin_start_lon.setValue(start_coords.get("longitude", 0))
+                    self.spin_start_lat.setValue(start_coords.get("latitude", 0))
+                    self.spin_start_elev.setValue(start_coords.get("elevation", 0))
+                
+                end_coords = geo_coords.get("end", {})
+                if end_coords:
+                    self.spin_end_lon.setValue(end_coords.get("longitude", 0))
+                    self.spin_end_lat.setValue(end_coords.get("latitude", 0))
+                    self.spin_end_elev.setValue(end_coords.get("elevation", 0))
+                
+                imported_items.append("geographic coordinates")
+            
+            if imported_items:
+                items_str = ", ".join(imported_items)
+                QMessageBox.information(self, "Success", f"Imported {items_str} from {filename}")
+            else:
+                QMessageBox.warning(self, "Warning", "No georeferencing data found in file")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to import georeference info: {str(e)}")
 
     def closeEvent(self, event):
         """Handle widget close event"""
