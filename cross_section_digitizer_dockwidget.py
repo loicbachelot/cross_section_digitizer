@@ -30,13 +30,58 @@ import json
 from qgis.PyQt import QtWidgets, uic
 from qgis.PyQt.QtCore import pyqtSignal, Qt, QPointF
 from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox, QSplitter, QAction
+from qgis.PyQt.QtGui import QPixmap, QColor
 from qgis.core import (QgsProject, QgsVectorLayer, QgsFeature, QgsGeometry, 
                        QgsLineString, QgsPolygon,
-                       QgsPoint, QgsField, QgsFields)
+                       QgsPoint, QgsField, QgsFields, QgsCoordinateReferenceSystem,
+                       QgsCoordinateTransform, QgsPointXY)
+from qgis.gui import QgsMapToolEmitPoint
 from qgis.PyQt.QtCore import QVariant
 
 # Import the new image viewer widget
 from .image_viewer_widget import ImageViewerWidget
+
+
+class GeographicCoordinateMapTool(QgsMapToolEmitPoint):
+    """Map tool for clicking to set geographic coordinates"""
+    
+    def __init__(self, canvas, callback):
+        super().__init__(canvas)
+        self.canvas = canvas
+        self.callback = callback
+        
+    def canvasReleaseEvent(self, e):
+        """Handle map click to get coordinates"""
+        try:
+            # Get click point in map coordinates
+            point = self.toMapCoordinates(e.pos())
+            
+            # Get current map CRS
+            map_crs = self.canvas.mapSettings().destinationCrs()
+            
+            # Transform to WGS84 if needed
+            wgs84_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+            
+            if map_crs != wgs84_crs:
+                # Check if transformation is possible
+                transform = QgsCoordinateTransform(map_crs, wgs84_crs, QgsProject.instance())
+                if not transform.isValid():
+                    self.callback(None, None, f"Cannot transform from {map_crs.authid()} to WGS84")
+                    return
+                
+                # Transform coordinates
+                try:
+                    wgs84_point = transform.transform(point)
+                    self.callback(wgs84_point.x(), wgs84_point.y(), None)
+                except Exception as ex:
+                    self.callback(None, None, f"Coordinate transformation failed: {str(ex)}")
+            else:
+                # Already in WGS84
+                self.callback(point.x(), point.y(), None)
+                
+        except Exception as ex:
+            self.callback(None, None, f"Error getting coordinates: {str(ex)}")
+
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'cross_section_digitizer_dockwidget_base.ui'))
@@ -62,6 +107,10 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.data_series = {}  # {series_name: [(x, y), ...]}
         self.current_series = None
         self.digitizing_mode = None  # 'origin', 'x_ref', 'y_ref', 'points', 'start_plot', 'end_plot'
+        
+        # Map tools for geographic coordinate selection
+        self.geo_map_tool = None
+        self.previous_map_tool = None
         
         # Create and setup the image viewer
         self.setup_image_viewer()
@@ -183,6 +232,9 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
     def setup_connections(self):
         """Connect UI signals to methods"""
         # Image tab
+        self.btn_load_project.clicked.connect(self.load_project)
+        self.btn_export_project.clicked.connect(self.export_project)
+        self.btn_clear_project.clicked.connect(self.clear_project)
         self.btn_load_image.clicked.connect(self.load_image)
         self.btn_set_origin.clicked.connect(lambda: self.start_reference_mode('origin'))
         self.btn_set_x_ref.clicked.connect(lambda: self.start_reference_mode('x_ref'))
@@ -197,6 +249,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.combo_series.currentTextChanged.connect(self.select_series)
         self.btn_digitize_points.clicked.connect(self.start_digitizing_points)
         self.btn_delete_point.clicked.connect(self.delete_selected_point)
+        self.btn_clear_series.clicked.connect(self.clear_current_series)
         self.btn_save_series.clicked.connect(self.save_series_to_file)
         
         # Georeference tab
@@ -205,6 +258,8 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.btn_clear_plot_points.clicked.connect(self.clear_plot_georef_points)
         self.btn_create_polygon.clicked.connect(self.create_georeferenced_polygon)
         self.btn_georeference_points.clicked.connect(self.georeference_digitized_points)
+        self.btn_click_start_geo.clicked.connect(self.activate_start_geo_tool)
+        self.btn_click_end_geo.clicked.connect(self.activate_end_geo_tool)
         self.btn_export_georeference.clicked.connect(self.export_georeference_info)
         self.btn_import_georeference.clicked.connect(self.import_georeference_info)
         
@@ -584,6 +639,52 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                     writer.writerow([x, y])
             QMessageBox.information(self, "Success", f"Series saved to {file_path}")
             
+    def clear_current_series(self):
+        """Remove the current series (removes series and all its points from dropdown)"""
+        if not self.current_series:
+            QMessageBox.warning(self, "Warning", "No series selected")
+            return
+            
+        if self.current_series not in self.data_series:
+            QMessageBox.warning(self, "Warning", "Selected series not found")
+            return
+            
+        # Ask for confirmation
+        reply = QMessageBox.question(
+            self, "Remove Series", 
+            f"Are you sure you want to remove series '{self.current_series}'?\n\nThis will remove the series from the dropdown.\nThis action cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            series_to_clear = self.current_series
+            
+            # Clear visual markers for this series
+            self.image_viewer.clear_series_markers(series_to_clear)
+            
+            # Remove from data structure
+            del self.data_series[series_to_clear]
+            
+            # Remove from combo box
+            index = self.combo_series.findText(series_to_clear)
+            if index >= 0:
+                self.combo_series.removeItem(index)
+            
+            # Update current series selection
+            if self.combo_series.count() > 0:
+                # Select the first available series
+                self.current_series = self.combo_series.itemText(0)
+                self.combo_series.setCurrentIndex(0)
+            else:
+                # No series left
+                self.current_series = None
+                
+            # Update the points list display
+            self.update_points_list()
+            
+            QMessageBox.information(self, "Success", f"Series '{series_to_clear}' removed successfully")
+            
     def create_georeferenced_polygon(self):
         """Create georeferenced polygon representing the cross-section"""
         if not self.image_path:
@@ -945,6 +1046,594 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to import georeference info: {str(e)}")
+
+    def activate_start_geo_tool(self):
+        """Activate map tool to click for start point geographic coordinates"""
+        self._activate_geo_coordinate_tool('start')
+    
+    def activate_end_geo_tool(self):
+        """Activate map tool to click for end point geographic coordinates"""
+        self._activate_geo_coordinate_tool('end')
+    
+    def _activate_geo_coordinate_tool(self, point_type):
+        """Helper method to activate geographic coordinate selection tool"""
+        try:
+            # Check if we have access to the map canvas
+            if not self.iface or not self.iface.mapCanvas():
+                QMessageBox.warning(self, "Warning", "Cannot access QGIS map canvas")
+                return
+            
+            canvas = self.iface.mapCanvas()
+            
+            # Check map CRS and warn if not WGS84
+            map_crs = canvas.mapSettings().destinationCrs()
+            wgs84_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+            
+            if map_crs != wgs84_crs:
+                # Check if transformation is possible
+                transform = QgsCoordinateTransform(map_crs, wgs84_crs, QgsProject.instance())
+                if not transform.isValid():
+                    QMessageBox.warning(
+                        self, "CRS Warning", 
+                        f"Cannot transform coordinates from {map_crs.authid()} to WGS84.\n\n"
+                        "Please set your QGIS project to use WGS84 (EPSG:4326) coordinate system "
+                        "for accurate geographic coordinate selection."
+                    )
+                    return
+                else:
+                    # Transformation is possible, but warn user
+                    reply = QMessageBox.question(
+                        self, "CRS Notice",
+                        f"Map is using {map_crs.authid()}, not WGS84.\n\n"
+                        "Coordinates will be automatically transformed to WGS84 lat/lon.\n\n"
+                        "Continue with map clicking?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.Yes
+                    )
+                    if reply != QMessageBox.Yes:
+                        return
+            
+            # Store previous map tool to restore later
+            self.previous_map_tool = canvas.mapTool()
+            
+            # Create callback function for this specific point type
+            def coordinate_callback(lon, lat, error):
+                self._handle_geo_coordinate_result(point_type, lon, lat, error)
+            
+            # Create and activate the map tool
+            self.geo_map_tool = GeographicCoordinateMapTool(canvas, coordinate_callback)
+            canvas.setMapTool(self.geo_map_tool)
+            
+            # Update button text to indicate active mode
+            if point_type == 'start':
+                self.btn_click_start_geo.setText("Click on Map (Active)")
+                self.btn_click_start_geo.setEnabled(False)
+            else:
+                self.btn_click_end_geo.setText("Click on Map (Active)")
+                self.btn_click_end_geo.setEnabled(False)
+            
+            # Show message to user
+            self.iface.messageBar().pushMessage(
+                "Cross Section Digitizer", 
+                f"Click on the map to set {point_type} point geographic coordinates. Press Escape to cancel.",
+                level=0,  # Info level
+                duration=5
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to activate map tool: {str(e)}")
+    
+    def _handle_geo_coordinate_result(self, point_type, lon, lat, error):
+        """Handle the result from map coordinate selection"""
+        try:
+            # Restore previous map tool
+            if self.previous_map_tool and self.iface.mapCanvas():
+                self.iface.mapCanvas().setMapTool(self.previous_map_tool)
+            
+            # Reset button states
+            self.btn_click_start_geo.setText("Click on Map for Start Point")
+            self.btn_click_start_geo.setEnabled(True)
+            self.btn_click_end_geo.setText("Click on Map for End Point")
+            self.btn_click_end_geo.setEnabled(True)
+            
+            if error:
+                QMessageBox.warning(self, "Coordinate Selection Error", error)
+                return
+            
+            if lon is None or lat is None:
+                QMessageBox.warning(self, "Warning", "No coordinates received from map click")
+                return
+            
+            # Set the coordinates in the appropriate spinboxes
+            if point_type == 'start':
+                self.spin_start_lon.setValue(lon)
+                self.spin_start_lat.setValue(lat)
+                self.iface.messageBar().pushMessage(
+                    "Cross Section Digitizer",
+                    f"Start point set to: {lon:.6f}, {lat:.6f}",
+                    level=3,  # Success level
+                    duration=3
+                )
+            else:  # end
+                self.spin_end_lon.setValue(lon)
+                self.spin_end_lat.setValue(lat)
+                self.iface.messageBar().pushMessage(
+                    "Cross Section Digitizer",
+                    f"End point set to: {lon:.6f}, {lat:.6f}",
+                    level=3,  # Success level
+                    duration=3
+                )
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to handle coordinate result: {str(e)}")
+
+    def export_project(self):
+        """Export complete project data to JSON"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Project", "", "JSON Files (*.json);;All Files (*)"
+        )
+        if not filename:
+            return
+            
+        # Add .json extension if not present
+        if not filename.lower().endswith('.json'):
+            filename += '.json'
+            
+        try:
+            from datetime import datetime
+            
+            # Build project data focused on essential data
+            project_data = {
+                "type": "cross_section_project",
+                "version": "1.0",
+                "created": datetime.now().isoformat(),
+                "image": None,
+                "coordinate_system": None,
+                "georeferencing": None,
+                "data_series": None
+            }
+            
+            # Add image information
+            if hasattr(self, 'image_path') and self.image_path:
+                image_size = self.image_viewer.get_image_size()
+                project_data["image"] = {
+                    "path": self.image_path,
+                    "width": image_size[0] if image_size else None,
+                    "height": image_size[1] if image_size else None
+                }
+            
+            # Add coordinate system (reference points)
+            if hasattr(self, 'reference_points') and self.reference_points:
+                reference_data = {}
+                for point_type, (pixel_x, pixel_y) in self.reference_points.items():
+                    point_data = {"pixel": [pixel_x, pixel_y]}
+                    
+                    if point_type == 'origin':
+                        point_data["plot"] = [
+                            self.spin_origin_x.value(),
+                            self.spin_origin_y.value()
+                        ]
+                    elif point_type == 'x_ref':
+                        point_data["value"] = self.spin_x_ref.value()
+                    elif point_type == 'y_ref':
+                        point_data["value"] = self.spin_y_ref.value()
+                        
+                    reference_data[point_type] = point_data
+                
+                if reference_data:
+                    project_data["coordinate_system"] = {
+                        "reference_points": reference_data,
+                        "is_validated": len(reference_data) == 3
+                    }
+            
+            # Add georeferencing information
+            geo_data = {}
+            
+            # Plot coordinates
+            if hasattr(self, 'plot_georef_points') and self.plot_georef_points:
+                plot_coords = {}
+                for point_type, (plot_x, plot_y) in self.plot_georef_points.items():
+                    plot_coords[point_type] = [plot_x, plot_y]
+                geo_data["plot_coordinates"] = plot_coords
+            
+            # Geographic coordinates
+            geo_data["geographic_coordinates"] = {
+                "start": {
+                    "longitude": self.spin_start_lon.value(),
+                    "latitude": self.spin_start_lat.value(),
+                    "elevation": self.spin_start_elev.value()
+                },
+                "end": {
+                    "longitude": self.spin_end_lon.value(),
+                    "latitude": self.spin_end_lat.value(),
+                    "elevation": self.spin_end_elev.value()
+                }
+            }
+            
+            if geo_data:
+                project_data["georeferencing"] = geo_data
+            
+            # Add data series
+            if hasattr(self, 'data_series') and self.data_series:
+                series_data = {
+                    "active_series": getattr(self, 'current_series', None),
+                    "series": dict(self.data_series)  # Copy the series data
+                }
+                project_data["data_series"] = series_data
+            
+            # Write to file
+            with open(filename, 'w') as f:
+                json.dump(project_data, f, indent=2)
+                
+            QMessageBox.information(self, "Success", f"Project exported to {filename}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to export project: {str(e)}")
+
+    def load_project(self):
+        """Load complete project data from JSON"""
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Load Project", "", "JSON Files (*.json);;All Files (*)"
+        )
+        if not filename:
+            return
+            
+        try:
+            with open(filename, 'r') as f:
+                project_data = json.load(f)
+            
+            # Validate basic project structure
+            project_type = project_data.get("type", "")
+            if project_type == "cross_section_project":
+                # New simplified project format
+                pass
+            elif project_type in ["cross_section_georeference_info", "cross_section_reference", "cross_section_georeference"]:
+                # Legacy georeference file
+                self.import_georeference_info()
+                return
+            else:
+                QMessageBox.warning(self, "Warning", "Invalid project file format")
+                return
+            
+            loaded_items = []
+            
+            # Clear existing data
+            reply = QMessageBox.question(
+                self, "Load Project", 
+                "Loading a project will replace all current data.\n\nDo you want to continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Load image
+            image_info = project_data.get("image")
+            if image_info and image_info.get("path"):
+                image_path = image_info["path"]
+                if os.path.exists(image_path):
+                    self.load_image_file(image_path)
+                    loaded_items.append("image")
+                else:
+                    QMessageBox.warning(self, "Missing File", f"Image file not found: {image_path}")
+            
+            # Load coordinate system (reference points)
+            coord_system = project_data.get("coordinate_system")
+            if coord_system and coord_system.get("reference_points"):
+                # Clear existing reference points
+                if hasattr(self, 'reference_points'):
+                    self.clear_reference_points()
+                
+                self.reference_points = {}
+                
+                for point_type, point_data in coord_system["reference_points"].items():
+                    if point_type in ['origin', 'x_ref', 'y_ref']:
+                        pixel_coords = point_data.get("pixel")
+                        if pixel_coords:
+                            self.reference_points[point_type] = tuple(pixel_coords)
+                            
+                            # Add visual marker
+                            self.image_viewer.add_reference_marker(
+                                pixel_coords[0], pixel_coords[1], point_type
+                            )
+                            
+                            # Set UI values
+                            if point_type == 'origin' and "plot" in point_data:
+                                self.spin_origin_x.setValue(point_data["plot"][0])
+                                self.spin_origin_y.setValue(point_data["plot"][1])
+                            elif point_type == 'x_ref' and "value" in point_data:
+                                self.spin_x_ref.setValue(point_data["value"])
+                            elif point_type == 'y_ref' and "value" in point_data:
+                                self.spin_y_ref.setValue(point_data["value"])
+                
+                loaded_items.append("coordinate system")
+            
+            # Load georeferencing
+            georef = project_data.get("georeferencing")
+            if georef:
+                # Load plot coordinates
+                plot_coords = georef.get("plot_coordinates", {})
+                if plot_coords:
+                    if not hasattr(self, 'plot_georef_points'):
+                        self.plot_georef_points = {}
+                    
+                    for point_type, coords in plot_coords.items():
+                        if point_type in ['start_plot', 'end_plot'] and len(coords) == 2:
+                            self.plot_georef_points[point_type] = tuple(coords)
+                            
+                            # Add visual marker - convert plot coordinates to pixel coordinates
+                            pixel_coords = self.plot_to_pixel_coords(coords[0], coords[1])
+                            if pixel_coords:
+                                pixel_x, pixel_y = pixel_coords
+                                self.image_viewer.add_georef_marker(pixel_x, pixel_y)
+                            
+                            # Update UI
+                            if point_type == 'start_plot':
+                                self.spin_start_plot_x.setValue(coords[0])
+                                self.spin_start_plot_y.setValue(coords[1])
+                            elif point_type == 'end_plot':
+                                self.spin_end_plot_x.setValue(coords[0])
+                                self.spin_end_plot_y.setValue(coords[1])
+                
+                # Load geographic coordinates
+                geo_coords = georef.get("geographic_coordinates", {})
+                if geo_coords:
+                    start_coords = geo_coords.get("start", {})
+                    if start_coords:
+                        self.spin_start_lon.setValue(start_coords.get("longitude", 0))
+                        self.spin_start_lat.setValue(start_coords.get("latitude", 0))
+                        self.spin_start_elev.setValue(start_coords.get("elevation", 0))
+                    
+                    end_coords = geo_coords.get("end", {})
+                    if end_coords:
+                        self.spin_end_lon.setValue(end_coords.get("longitude", 0))
+                        self.spin_end_lat.setValue(end_coords.get("latitude", 0))
+                        self.spin_end_elev.setValue(end_coords.get("elevation", 0))
+                
+                loaded_items.append("georeferencing")
+            
+            # Load data series
+            data_series_info = project_data.get("data_series")
+            if data_series_info and data_series_info.get("series"):
+                # Clear existing series
+                if hasattr(self, 'data_series'):
+                    self.data_series.clear()
+                    self.combo_series.clear()
+                else:
+                    self.data_series = {}
+                
+                # Load series data
+                for series_name, points in data_series_info["series"].items():
+                    self.data_series[series_name] = points
+                    self.combo_series.addItem(series_name)
+                    
+                    # Add visual markers - convert plot coordinates back to pixel coordinates
+                    for plot_x, plot_y in points:
+                        pixel_coords = self.plot_to_pixel_coords(plot_x, plot_y)
+                        if pixel_coords:
+                            pixel_x, pixel_y = pixel_coords
+                            self.image_viewer.add_data_marker(pixel_x, pixel_y, series_name, False)
+                
+                # Set active series
+                active_series = data_series_info.get("active_series")
+                if active_series and active_series in self.data_series:
+                    self.current_series = active_series
+                    index = self.combo_series.findText(active_series)
+                    if index >= 0:
+                        self.combo_series.setCurrentIndex(index)
+                        # Update marker colors
+                        self.image_viewer.update_series_colors(active_series)
+                elif self.data_series:
+                    # Set first series as active
+                    first_series = next(iter(self.data_series))
+                    self.current_series = first_series
+                    self.combo_series.setCurrentIndex(0)
+                    self.image_viewer.update_series_colors(first_series)
+                
+                # Update points list
+                self.update_points_list()
+                loaded_items.append("data series")
+            
+            if loaded_items:
+                items_str = ", ".join(loaded_items)
+                QMessageBox.information(self, "Success", f"Project loaded successfully!\n\nLoaded: {items_str}")
+            else:
+                QMessageBox.warning(self, "Warning", "No data found in project file")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load project: {str(e)}")
+
+    def clear_project(self):
+        """Clear all project data with confirmation dialog"""
+        # Show confirmation dialog
+        reply = QMessageBox.question(
+            self, "Clear Project", 
+            "This will clear all project data including:\n\n"
+            "• Loaded image\n"
+            "• Reference points and coordinate system\n"
+            "• All digitized data series\n"
+            "• Georeferencing information\n\n"
+            "Are you sure you want to continue?\n\n"
+            "This action cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No  # Default to No for safety
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        try:
+            # Clear image
+            self.image_path = None
+            self.label_image_path.setText("No image loaded")
+            
+            # Clear image viewer
+            if hasattr(self, 'image_viewer'):
+                # Clear the scene but don't remove the viewer itself
+                if hasattr(self.image_viewer, 'scene') and self.image_viewer.scene:
+                    self.image_viewer.scene.clear()
+                # Reset any internal state
+                self.image_viewer.image_item = None
+                self.image_viewer.image_pixmap = None
+                
+            # Clear reference points
+            if hasattr(self, 'reference_points'):
+                self.reference_points.clear()
+            
+            # Reset reference point UI values
+            self.spin_origin_x.setValue(0.0)
+            self.spin_origin_y.setValue(0.0)
+            self.spin_x_ref.setValue(0.0)
+            self.spin_y_ref.setValue(0.0)
+            
+            # Clear plot georeferencing points
+            if hasattr(self, 'plot_georef_points'):
+                self.plot_georef_points.clear()
+                
+            # Reset plot coordinate UI values
+            self.spin_start_plot_x.setValue(0.0)
+            self.spin_start_plot_y.setValue(0.0)
+            self.spin_end_plot_x.setValue(0.0)
+            self.spin_end_plot_y.setValue(0.0)
+            
+            # Reset geographic coordinates
+            self.spin_start_lon.setValue(0.0)
+            self.spin_start_lat.setValue(0.0)
+            self.spin_start_elev.setValue(0.0)
+            self.spin_end_lon.setValue(0.0)
+            self.spin_end_lat.setValue(0.0)
+            self.spin_end_elev.setValue(0.0)
+            
+            # Clear data series
+            if hasattr(self, 'data_series'):
+                self.data_series.clear()
+            self.current_series = None
+            self.combo_series.clear()
+            self.list_points.clear()
+            
+            # Clear all markers from image viewer
+            self.clear_all_markers()
+            
+            # Reset digitizing mode
+            self.digitizing_mode = None
+            if hasattr(self, 'image_viewer'):
+                self.image_viewer.action_digitize.setChecked(False)
+                self.image_viewer.toggle_digitize_mode(False)
+            
+            # Disable digitize points button
+            self.btn_digitize_points.setChecked(False)
+            
+            QMessageBox.information(self, "Success", "Project cleared successfully!")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to clear project: {str(e)}")
+
+    def activate_start_geo_tool(self):
+        """Activate map tool for selecting start point geographic coordinates"""
+        self._activate_geo_coordinate_tool('start')
+        
+    def activate_end_geo_tool(self):
+        """Activate map tool for selecting end point geographic coordinates"""
+        self._activate_geo_coordinate_tool('end')
+        
+    def _activate_geo_coordinate_tool(self, point_type):
+        """Activate the geographic coordinate selection map tool"""
+        try:
+            # Get the map canvas
+            canvas = self.iface.mapCanvas()
+            if not canvas:
+                QMessageBox.warning(self, "Error", "No map canvas available")
+                return
+            
+            # Check current CRS and warn if not WGS84
+            map_crs = canvas.mapSettings().destinationCrs()
+            wgs84_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+            
+            if map_crs != wgs84_crs:
+                # Check if transformation is possible
+                transform = QgsCoordinateTransform(map_crs, wgs84_crs, QgsProject.instance())
+                if not transform.isValid():
+                    QMessageBox.warning(
+                        self, "CRS Warning", 
+                        f"Cannot transform coordinates from {map_crs.authid()} to WGS84.\n"
+                        f"Please ensure your map is in a supported coordinate system."
+                    )
+                    return
+                else:
+                    # Show info about transformation
+                    reply = QMessageBox.question(
+                        self, "CRS Notice", 
+                        f"The map is currently in {map_crs.authid()}, not WGS84.\n"
+                        f"Coordinates will be automatically transformed to WGS84.\n\n"
+                        f"Continue with map clicking?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.Yes
+                    )
+                    if reply != QMessageBox.Yes:
+                        return
+            
+            # Store the current map tool to restore later
+            self.previous_map_tool = canvas.mapTool()
+            
+            # Create callback function for this point type
+            def coordinate_callback(lon, lat, error):
+                if error:
+                    QMessageBox.warning(self, "Coordinate Error", error)
+                elif lon is not None and lat is not None:
+                    # Set the coordinates in the appropriate spinboxes
+                    if point_type == 'start':
+                        self.spin_start_lon.setValue(lon)
+                        self.spin_start_lat.setValue(lat)
+                        self.iface.messageBar().pushMessage(
+                            "CrossSectionDigitizer", 
+                            f"Start point set to: {lon:.6f}, {lat:.6f}", 
+                            level=3, duration=3
+                        )
+                    elif point_type == 'end':
+                        self.spin_end_lon.setValue(lon)
+                        self.spin_end_lat.setValue(lat)
+                        self.iface.messageBar().pushMessage(
+                            "CrossSectionDigitizer", 
+                            f"End point set to: {lon:.6f}, {lat:.6f}", 
+                            level=3, duration=3
+                        )
+                
+                # Restore the previous map tool
+                if self.previous_map_tool:
+                    canvas.setMapTool(self.previous_map_tool)
+                else:
+                    canvas.unsetMapTool(self.geo_map_tool)
+                self.geo_map_tool = None
+            
+            # Create and activate the map tool
+            self.geo_map_tool = GeographicCoordinateMapTool(canvas, coordinate_callback)
+            canvas.setMapTool(self.geo_map_tool)
+            
+            # Show message to user
+            point_name = "start" if point_type == 'start' else "end"
+            self.iface.messageBar().pushMessage(
+                "CrossSectionDigitizer", 
+                f"Click on the map to set the {point_name} point coordinates. Press Escape to cancel.", 
+                level=0, duration=5
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to activate map tool: {str(e)}")
+
+    def load_image_file(self, file_path):
+        """Helper method to load image from file path"""
+        if os.path.exists(file_path):
+            # Load image into the viewer using the proper method
+            if self.image_viewer.load_image(file_path):
+                self.image_path = file_path
+                layer_name = os.path.basename(file_path)
+                self.label_image_path.setText(f"Loaded: {layer_name}")
+                
+                # Set up coordinate transformation callback
+                self.image_viewer.set_coordinate_transform_callback(self.pixel_to_plot_coords)
+                return True
+        return False
 
     def closeEvent(self, event):
         """Handle widget close event"""

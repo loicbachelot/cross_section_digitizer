@@ -26,6 +26,36 @@
        </attribute>
        <layout class="QVBoxLayout" name="verticalLayout_2">
         <item>
+         <widget class="QGroupBox" name="groupBox_project">
+          <property name="title">
+           <string>Project</string>
+          </property>
+          <layout class="QHBoxLayout" name="horizontalLayout_project">
+           <item>
+            <widget class="QPushButton" name="btn_load_project">
+             <property name="text">
+              <string>Load Project</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btn_export_project">
+             <property name="text">
+              <string>Export Project</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btn_clear_project">
+             <property name="text">
+              <string>Clear Project</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
          <widget class="QGroupBox" name="groupBox_image">
           <property name="title">
            <string>Plot Image</string>
@@ -289,6 +319,13 @@
               </widget>
              </item>
              <item>
+              <widget class="QPushButton" name="btn_clear_series">
+               <property name="text">
+                <string>Remove Series</string>
+               </property>
+              </widget>
+             </item>
+             <item>
               <widget class="QPushButton" name="btn_save_series">
                <property name="text">
                 <string>Save Series</string>
@@ -516,6 +553,13 @@
             </layout>
            </item>
            <item>
+            <widget class="QPushButton" name="btn_click_start_geo">
+             <property name="text">
+              <string>Click on Map for Start Point</string>
+             </property>
+            </widget>
+           </item>
+           <item>
             <widget class="QLabel" name="label_9">
              <property name="text">
               <string>End Point (Lon, Lat, Elev):</string>
@@ -564,6 +608,13 @@
               </widget>
              </item>
             </layout>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btn_click_end_geo">
+             <property name="text">
+              <string>Click on Map for End Point</string>
+             </property>
+            </widget>
            </item>
            <item>
             <widget class="QPushButton" name="btn_create_polygon">
