@@ -34,7 +34,7 @@ from qgis.PyQt.QtGui import QPixmap, QColor
 from qgis.core import (QgsProject, QgsVectorLayer, QgsFeature, QgsGeometry, 
                        QgsLineString, QgsPolygon,
                        QgsPoint, QgsField, QgsFields, QgsCoordinateReferenceSystem,
-                       QgsCoordinateTransform, QgsPointXY)
+                       QgsCoordinateTransform, QgsPointXY, QgsMapLayerType)
 from qgis.gui import QgsMapToolEmitPoint
 from qgis.PyQt.QtCore import QVariant
 
@@ -816,22 +816,45 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             QMessageBox.warning(self, "Error", "Please set georeferencing coordinates")
             return
             
-        # Create point layer for each series
+        # Track updated/created layers
+        updated_layers = []
+        created_layers = []
+        
+        # Create or update point layer for each series
         for series_name, points in self.data_series.items():
             if not points:
                 continue
                 
-            # Create point layer
-            layer = QgsVectorLayer("PointZ?crs=EPSG:4326", f"Georeferenced_{series_name}", "memory")
-            provider = layer.dataProvider()
+            layer_name = f"Georeferenced_{series_name}"
             
-            # Add fields
-            fields = QgsFields()
-            fields.append(QgsField("series", QVariant.String))
-            fields.append(QgsField("point_id", QVariant.Int))
-            provider.addAttributes(fields)
-            layer.updateFields()
+            # Check if layer already exists in the project
+            existing_layer = None
+            for layer in QgsProject.instance().mapLayers().values():
+                if layer.name() == layer_name and layer.type() == QgsMapLayerType.VectorLayer:
+                    existing_layer = layer
+                    break
             
+            # Use existing layer or create new one
+            if existing_layer:
+                layer = existing_layer
+                # Clear existing features
+                provider = layer.dataProvider()
+                provider.deleteFeatures(provider.getFeatureIds())
+                updated_layers.append(series_name)
+            else:
+                # Create new layer
+                layer = QgsVectorLayer("PointZ?crs=EPSG:4326", layer_name, "memory")
+                provider = layer.dataProvider()
+                
+                # Add fields for new layers
+                fields = QgsFields()
+                fields.append(QgsField("series", QVariant.String))
+                fields.append(QgsField("point_id", QVariant.Int))
+                provider.addAttributes(fields)
+                layer.updateFields()
+                created_layers.append(series_name)
+            
+            # Generate features
             features = []
             for i, (plot_x, plot_y) in enumerate(points):
                 georef_points = project_x_sec_pts_to_geog(
@@ -846,19 +869,32 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                     lon, lat, elev = georef_points[0]
                     
                     feature = QgsFeature()
-                    #feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(lon, lat)))
-                    feature.setGeometry(QgsGeometry.fromPoint(QgsPoint(lon,lat,elev)))
+                    feature.setGeometry(QgsGeometry.fromPoint(QgsPoint(lon, lat, elev)))
                     feature.setAttributes([
                         series_name, i+1
                     ])
                     features.append(feature)
             
+            # Add features to layer
             if features:
                 provider.addFeatures(features)
                 layer.updateExtents()
-                QgsProject.instance().addMapLayer(layer)
+                
+                # Add to project only if it's a new layer
+                if layer not in QgsProject.instance().mapLayers().values():
+                    QgsProject.instance().addMapLayer(layer)
         
-        QMessageBox.information(self, "Success", "Digitized points georeferenced and added to project")
+        # Show appropriate success message
+        if updated_layers and created_layers:
+            message = f"Updated layers: {', '.join(updated_layers)}\nCreated layers: {', '.join(created_layers)}"
+        elif updated_layers:
+            message = f"Updated existing layers: {', '.join(updated_layers)}"
+        elif created_layers:
+            message = f"Created new layers: {', '.join(created_layers)}"
+        else:
+            message = "No layers were created or updated"
+        
+        QMessageBox.information(self, "Success", f"Digitized points georeferenced!\n\n{message}")
 
     def clear_all_markers(self):
         """Clear all markers from the image viewer"""
@@ -966,76 +1002,15 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             imported_items = []
             
             # Import reference points if present
-            reference_points = data.get("reference_points", {})
-            if reference_points:
-                # Clear existing reference points
-                self.clear_reference_points()
-                
-                # Import reference points
-                for point_type, point_data in reference_points.items():
-                    if point_type in ['origin', 'x_ref', 'y_ref']:
-                        pixel_coords = point_data.get("pixel")
-                        if pixel_coords:
-                            # Store pixel coordinates
-                            self.reference_points[point_type] = tuple(pixel_coords)
-                            
-                            # Add marker to image viewer
-                            self.image_viewer.add_reference_marker(
-                                pixel_coords[0], pixel_coords[1], point_type
-                            )
-                            
-                            # Set plot coordinates in UI
-                            if point_type == 'origin' and "plot" in point_data:
-                                self.spin_origin_x.setValue(point_data["plot"][0])
-                                self.spin_origin_y.setValue(point_data["plot"][1])
-                            elif point_type == 'x_ref' and "value" in point_data:
-                                self.spin_x_ref.setValue(point_data["value"])
-                            elif point_type == 'y_ref' and "value" in point_data:
-                                self.spin_y_ref.setValue(point_data["value"])
-                
+            if self._load_reference_points_from_data(data):
                 imported_items.append("reference points")
             
             # Import plot coordinates if present
-            plot_coords = data.get("plot_coordinates", {})
-            if plot_coords:
-                # Clear existing plot points
-                self.clear_plot_georef_points()
-                
-                # Import plot coordinates
-                for point_type, coords in plot_coords.items():
-                    if point_type in ['start_plot', 'end_plot'] and len(coords) == 2:
-                        if not hasattr(self, 'plot_georef_points'):
-                            self.plot_georef_points = {}
-                        self.plot_georef_points[point_type] = tuple(coords)
-                        
-                        # Add marker to image viewer  
-                        self.image_viewer.add_georef_marker(coords[0], coords[1])
-                        
-                        # Update UI spinboxes
-                        if point_type == 'start_plot':
-                            self.spin_start_plot_x.setValue(coords[0])
-                            self.spin_start_plot_y.setValue(coords[1])
-                        elif point_type == 'end_plot':
-                            self.spin_end_plot_x.setValue(coords[0])
-                            self.spin_end_plot_y.setValue(coords[1])
-                
+            if self._load_plot_coordinates_from_data(data):
                 imported_items.append("plot coordinates")
             
             # Import geographic coordinates if present
-            geo_coords = data.get("geographic_coordinates", {})
-            if geo_coords:
-                start_coords = geo_coords.get("start", {})
-                if start_coords:
-                    self.spin_start_lon.setValue(start_coords.get("longitude", 0))
-                    self.spin_start_lat.setValue(start_coords.get("latitude", 0))
-                    self.spin_start_elev.setValue(start_coords.get("elevation", 0))
-                
-                end_coords = geo_coords.get("end", {})
-                if end_coords:
-                    self.spin_end_lon.setValue(end_coords.get("longitude", 0))
-                    self.spin_end_lat.setValue(end_coords.get("latitude", 0))
-                    self.spin_end_elev.setValue(end_coords.get("elevation", 0))
-                
+            if self._load_geographic_coordinates_from_data(data):
                 imported_items.append("geographic coordinates")
             
             if imported_items:
@@ -1046,6 +1021,91 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to import georeference info: {str(e)}")
+
+    def _load_reference_points_from_data(self, data):
+        """Helper function to load reference points from JSON data"""
+        reference_points = data.get("reference_points", {})
+        if not reference_points:
+            return False
+            
+        # Clear existing reference points
+        self.clear_reference_points()
+        
+        # Import reference points
+        for point_type, point_data in reference_points.items():
+            if point_type in ['origin', 'x_ref', 'y_ref']:
+                pixel_coords = point_data.get("pixel")
+                if pixel_coords:
+                    # Store pixel coordinates
+                    self.reference_points[point_type] = tuple(pixel_coords)
+                    
+                    # Add marker to image viewer
+                    self.image_viewer.add_reference_marker(
+                        pixel_coords[0], pixel_coords[1], point_type
+                    )
+                    
+                    # Set plot coordinates in UI
+                    if point_type == 'origin' and "plot" in point_data:
+                        self.spin_origin_x.setValue(point_data["plot"][0])
+                        self.spin_origin_y.setValue(point_data["plot"][1])
+                    elif point_type == 'x_ref' and "value" in point_data:
+                        self.spin_x_ref.setValue(point_data["value"])
+                    elif point_type == 'y_ref' and "value" in point_data:
+                        self.spin_y_ref.setValue(point_data["value"])
+        
+        return True
+
+    def _load_plot_coordinates_from_data(self, data):
+        """Helper function to load plot coordinates from JSON data"""
+        plot_coords = data.get("plot_coordinates", {})
+        if not plot_coords:
+            return False
+            
+        # Clear existing plot points
+        self.clear_plot_georef_points()
+        
+        # Import plot coordinates
+        for point_type, coords in plot_coords.items():
+            if point_type in ['start_plot', 'end_plot'] and len(coords) == 2:
+                if not hasattr(self, 'plot_georef_points'):
+                    self.plot_georef_points = {}
+                self.plot_georef_points[point_type] = tuple(coords)
+                
+                # Add visual marker - convert plot coordinates to pixel coordinates
+                pixel_coords = self.plot_to_pixel_coords(coords[0], coords[1])
+                if pixel_coords:
+                    pixel_x, pixel_y = pixel_coords
+                    self.image_viewer.add_georef_marker(pixel_x, pixel_y)
+                
+                # Update UI spinboxes
+                if point_type == 'start_plot':
+                    self.spin_start_plot_x.setValue(coords[0])
+                    self.spin_start_plot_y.setValue(coords[1])
+                elif point_type == 'end_plot':
+                    self.spin_end_plot_x.setValue(coords[0])
+                    self.spin_end_plot_y.setValue(coords[1])
+        
+        return True
+
+    def _load_geographic_coordinates_from_data(self, data):
+        """Helper function to load geographic coordinates from JSON data"""
+        geo_coords = data.get("geographic_coordinates", {})
+        if not geo_coords:
+            return False
+            
+        start_coords = geo_coords.get("start", {})
+        if start_coords:
+            self.spin_start_lon.setValue(start_coords.get("longitude", 0))
+            self.spin_start_lat.setValue(start_coords.get("latitude", 0))
+            self.spin_start_elev.setValue(start_coords.get("elevation", 0))
+        
+        end_coords = geo_coords.get("end", {})
+        if end_coords:
+            self.spin_end_lon.setValue(end_coords.get("longitude", 0))
+            self.spin_end_lat.setValue(end_coords.get("latitude", 0))
+            self.spin_end_elev.setValue(end_coords.get("elevation", 0))
+        
+        return True
 
     def activate_start_geo_tool(self):
         """Activate map tool to click for start point geographic coordinates"""
@@ -1321,77 +1381,26 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             # Load coordinate system (reference points)
             coord_system = project_data.get("coordinate_system")
             if coord_system and coord_system.get("reference_points"):
-                # Clear existing reference points
-                if hasattr(self, 'reference_points'):
-                    self.clear_reference_points()
-                
-                self.reference_points = {}
-                
-                for point_type, point_data in coord_system["reference_points"].items():
-                    if point_type in ['origin', 'x_ref', 'y_ref']:
-                        pixel_coords = point_data.get("pixel")
-                        if pixel_coords:
-                            self.reference_points[point_type] = tuple(pixel_coords)
-                            
-                            # Add visual marker
-                            self.image_viewer.add_reference_marker(
-                                pixel_coords[0], pixel_coords[1], point_type
-                            )
-                            
-                            # Set UI values
-                            if point_type == 'origin' and "plot" in point_data:
-                                self.spin_origin_x.setValue(point_data["plot"][0])
-                                self.spin_origin_y.setValue(point_data["plot"][1])
-                            elif point_type == 'x_ref' and "value" in point_data:
-                                self.spin_x_ref.setValue(point_data["value"])
-                            elif point_type == 'y_ref' and "value" in point_data:
-                                self.spin_y_ref.setValue(point_data["value"])
-                
-                loaded_items.append("coordinate system")
+                # Adapt project data structure to match helper function expectations
+                adapted_data = {"reference_points": coord_system["reference_points"]}
+                if self._load_reference_points_from_data(adapted_data):
+                    loaded_items.append("coordinate system")
             
             # Load georeferencing
             georef = project_data.get("georeferencing")
             if georef:
-                # Load plot coordinates
-                plot_coords = georef.get("plot_coordinates", {})
-                if plot_coords:
-                    if not hasattr(self, 'plot_georef_points'):
-                        self.plot_georef_points = {}
-                    
-                    for point_type, coords in plot_coords.items():
-                        if point_type in ['start_plot', 'end_plot'] and len(coords) == 2:
-                            self.plot_georef_points[point_type] = tuple(coords)
-                            
-                            # Add visual marker - convert plot coordinates to pixel coordinates
-                            pixel_coords = self.plot_to_pixel_coords(coords[0], coords[1])
-                            if pixel_coords:
-                                pixel_x, pixel_y = pixel_coords
-                                self.image_viewer.add_georef_marker(pixel_x, pixel_y)
-                            
-                            # Update UI
-                            if point_type == 'start_plot':
-                                self.spin_start_plot_x.setValue(coords[0])
-                                self.spin_start_plot_y.setValue(coords[1])
-                            elif point_type == 'end_plot':
-                                self.spin_end_plot_x.setValue(coords[0])
-                                self.spin_end_plot_y.setValue(coords[1])
+                georef_loaded = False
                 
-                # Load geographic coordinates
-                geo_coords = georef.get("geographic_coordinates", {})
-                if geo_coords:
-                    start_coords = geo_coords.get("start", {})
-                    if start_coords:
-                        self.spin_start_lon.setValue(start_coords.get("longitude", 0))
-                        self.spin_start_lat.setValue(start_coords.get("latitude", 0))
-                        self.spin_start_elev.setValue(start_coords.get("elevation", 0))
-                    
-                    end_coords = geo_coords.get("end", {})
-                    if end_coords:
-                        self.spin_end_lon.setValue(end_coords.get("longitude", 0))
-                        self.spin_end_lat.setValue(end_coords.get("latitude", 0))
-                        self.spin_end_elev.setValue(end_coords.get("elevation", 0))
+                # Load plot coordinates using helper function
+                if self._load_plot_coordinates_from_data(georef):
+                    georef_loaded = True
                 
-                loaded_items.append("georeferencing")
+                # Load geographic coordinates using helper function
+                if self._load_geographic_coordinates_from_data(georef):
+                    georef_loaded = True
+                
+                if georef_loaded:
+                    loaded_items.append("georeferencing")
             
             # Load data series
             data_series_info = project_data.get("data_series")
@@ -1435,9 +1444,45 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                 self.update_points_list()
                 loaded_items.append("data series")
             
+            # Validate coordinate system if reference points were loaded
+            validation_message = ""
+            if "coordinate system" in loaded_items:
+                # Check if validation would pass (simple check without dialogs)
+                missing = []
+                if not self.image_path:
+                    missing.append("- No image loaded")
+                if 'origin' not in self.reference_points:
+                    missing.append("- Origin point not set")
+                elif self.spin_origin_x.value() == 0 and self.spin_origin_y.value() == 0:
+                    missing.append("- Origin X,Y values not set")
+                if 'x_ref' not in self.reference_points:
+                    missing.append("- X reference point not set")
+                elif self.spin_x_ref.value() == 0:
+                    missing.append("- X reference value not set")
+                if 'y_ref' not in self.reference_points:
+                    missing.append("- Y reference point not set")
+                elif self.spin_y_ref.value() == 0:
+                    missing.append("- Y reference value not set")
+                
+                if missing:
+                    validation_message = f"\n\nCoordinate System Warning:\nReference points incomplete:\n" + "\n".join(missing)
+                elif len(self.reference_points) == 3:
+                    # Check collinearity
+                    origin = self.reference_points['origin']
+                    x_ref = self.reference_points['x_ref']
+                    y_ref = self.reference_points['y_ref']
+                    vx = (x_ref[0] - origin[0], x_ref[1] - origin[1])
+                    vy = (y_ref[0] - origin[0], y_ref[1] - origin[1])
+                    cross = abs(vx[0] * vy[1] - vx[1] * vy[0])
+                    if cross < 10:
+                        validation_message = f"\n\nCoordinate System Warning:\nReference points are nearly collinear.\nThis may result in poor coordinate transformation."
+                    else:
+                        # Valid - enable coordinate transformation
+                        self.image_viewer.set_coordinate_transform_callback(self.pixel_to_plot_coords)
+            
             if loaded_items:
                 items_str = ", ".join(loaded_items)
-                QMessageBox.information(self, "Success", f"Project loaded successfully!\n\nLoaded: {items_str}")
+                QMessageBox.information(self, "Success", f"Project loaded successfully!\n\nLoaded: {items_str}{validation_message}")
             else:
                 QMessageBox.warning(self, "Warning", "No data found in project file")
             
@@ -1470,16 +1515,29 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             
             # Clear image viewer
             if hasattr(self, 'image_viewer'):
-                # Clear the scene but don't remove the viewer itself
+                # Clear the scene - this will automatically remove all graphics items
                 if hasattr(self.image_viewer, 'scene') and self.image_viewer.scene:
                     self.image_viewer.scene.clear()
-                # Reset any internal state
+                
+                # Reset internal marker tracking without trying to remove items from scene
+                if hasattr(self.image_viewer, 'reference_markers'):
+                    self.image_viewer.reference_markers.clear()
+                if hasattr(self.image_viewer, 'series_markers'):
+                    self.image_viewer.series_markers.clear()
+                if hasattr(self.image_viewer, 'georef_markers'):
+                    self.image_viewer.georef_markers.clear()
+                    
+                # Reset image state
                 self.image_viewer.image_item = None
                 self.image_viewer.image_pixmap = None
                 
             # Clear reference points
             if hasattr(self, 'reference_points'):
                 self.reference_points.clear()
+            
+            # Disable coordinate transformation callback
+            if hasattr(self, 'image_viewer'):
+                self.image_viewer.set_coordinate_transform_callback(None)
             
             # Reset reference point UI values
             self.spin_origin_x.setValue(0.0)
@@ -1511,9 +1569,6 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             self.current_series = None
             self.combo_series.clear()
             self.list_points.clear()
-            
-            # Clear all markers from image viewer
-            self.clear_all_markers()
             
             # Reset digitizing mode
             self.digitizing_mode = None
