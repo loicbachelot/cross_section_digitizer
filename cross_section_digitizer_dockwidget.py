@@ -839,7 +839,9 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                 layer = existing_layer
                 # Clear existing features
                 provider = layer.dataProvider()
-                provider.deleteFeatures(provider.getFeatureIds())
+                feature_ids = [f.id() for f in layer.getFeatures()]
+                if feature_ids:
+                    provider.deleteFeatures(feature_ids)
                 updated_layers.append(series_name)
             else:
                 # Create new layer
