@@ -3,12 +3,12 @@
 Image viewer widget for cross-section digitizing
 Inspired by QGIS Georeferencer tool
 """
-import sip
+from qgis.PyQt import sip
 from qgis.PyQt.QtCore import Qt, QPointF, QRectF, pyqtSignal,  QSize, QSettings
-from qgis.PyQt.QtGui import (QPixmap, QPen, QColor, QPainter, QCursor)
+from qgis.PyQt.QtGui import (QAction, QPixmap, QPen, QColor, QPainter, QCursor)
 from qgis.PyQt.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolBar,
                                 QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-                                QAction, QLabel, QGraphicsLineItem,
+                                QLabel, QGraphicsLineItem,
                                 QGraphicsItem, QMenu, QColorDialog)
 
 
@@ -44,19 +44,19 @@ class ImageGraphicsView(QGraphicsView):
     
     # Signals
     mousePositionChanged = pyqtSignal(QPointF)  # Emits image coordinates
-    mouseClicked = pyqtSignal(QPointF, int)  # Emits image coordinates and button
+    mouseClicked = pyqtSignal(QPointF, object)  # Image coordinates and Qt mouse button
     
     def __init__(self, parent=None):
         super().__init__(parent)
         
         # Setup view properties
-        self.setDragMode(QGraphicsView.NoDrag)
-        self.setRenderHint(QPainter.Antialiasing)
-        self.setRenderHint(QPainter.SmoothPixmapTransform)
-        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
         # Interaction modes
         self.pan_mode = False
@@ -75,7 +75,7 @@ class ImageGraphicsView(QGraphicsView):
         if self.scene() is None:
             return
         if self.h_line is None or self.v_line is None:
-            pen = QPen(QColor(128, 128, 128), 0.5, Qt.DashLine)
+            pen = QPen(QColor(128, 128, 128), 0.5, Qt.PenStyle.DashLine)
             self.h_line = self.scene().addLine(0, 0, 0, 0, pen)
             self.v_line = self.scene().addLine(0, 0, 0, 0, pen)
             if self.h_line:
@@ -121,7 +121,7 @@ class ImageGraphicsView(QGraphicsView):
         zoom_out_factor = 1.0 / zoom_in_factor
         
         # Save the scene pos
-        old_pos = self.mapToScene(event.pos())
+        old_pos = self.mapToScene(event.position().toPoint())
         
         # Zoom
         if event.angleDelta().y() > 0:
@@ -132,7 +132,7 @@ class ImageGraphicsView(QGraphicsView):
         self.scale(zoom_factor, zoom_factor)
         
         # Get the new position
-        new_pos = self.mapToScene(event.pos())
+        new_pos = self.mapToScene(event.position().toPoint())
         
         # Move scene to old position
         delta = new_pos - old_pos
@@ -142,13 +142,13 @@ class ImageGraphicsView(QGraphicsView):
         """Handle mouse press events"""
         scene_pos = self.mapToScene(event.pos())
         
-        if self.digitize_mode and event.button() == Qt.LeftButton:
+        if self.digitize_mode and event.button() == Qt.MouseButton.LeftButton:
             # Emit click for digitizing
             self.mouseClicked.emit(scene_pos, event.button())
-        elif event.button() == Qt.MiddleButton or (event.button() == Qt.LeftButton and self.pan_mode):
+        elif event.button() == Qt.MouseButton.MiddleButton or (event.button() == Qt.MouseButton.LeftButton and self.pan_mode):
             # Start panning
             self._pan_start_pos = event.pos()
-            self.setCursor(QCursor(Qt.ClosedHandCursor))
+            self.setCursor(QCursor(Qt.CursorShape.ClosedHandCursor))
         else:
             super().mousePressEvent(event)
             
@@ -208,9 +208,9 @@ class ImageGraphicsView(QGraphicsView):
         if self._pan_start_pos:
             self._pan_start_pos = None
             if self.pan_mode:
-                self.setCursor(QCursor(Qt.OpenHandCursor))
+                self.setCursor(QCursor(Qt.CursorShape.OpenHandCursor))
             else:
-                self.setCursor(QCursor(Qt.ArrowCursor))
+                self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
         else:
             super().mouseReleaseEvent(event)
             
@@ -220,7 +220,7 @@ class ImageGraphicsView(QGraphicsView):
             menu = QMenu(self)
             color_action = menu.addAction("Change Marker Color...")
             color_action.triggered.connect(self.parent().show_marker_color_dialog)
-            menu.exec_(event.globalPos())
+            menu.exec(event.globalPos())
         else:
             super().contextMenuEvent(event)
             
@@ -229,10 +229,10 @@ class ImageGraphicsView(QGraphicsView):
         self.pan_mode = enabled
         if enabled:
             self.digitize_mode = False
-            self.setDragMode(QGraphicsView.NoDrag)
-            self.setCursor(QCursor(Qt.OpenHandCursor))
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
+            self.setCursor(QCursor(Qt.CursorShape.OpenHandCursor))
         else:
-            self.setCursor(QCursor(Qt.ArrowCursor))
+            self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
             
     def set_digitize_mode(self, enabled: bool):
         """Enable/disable digitize mode"""
@@ -240,7 +240,7 @@ class ImageGraphicsView(QGraphicsView):
         self.setMouseTracking(self.digitize_mode)
         if self.digitize_mode:
             # cursor + ensure crosshair exists
-            try: self.setCursor(QCursor(Qt.CrossCursor))
+            try: self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
             except Exception: pass
             if getattr(self, 'h_line', None) is None or sip.isdeleted(getattr(self, 'h_line', None)):
                 self.h_line = QGraphicsLineItem()
@@ -249,13 +249,13 @@ class ImageGraphicsView(QGraphicsView):
                 self.v_line = QGraphicsLineItem()
                 self.scene().addItem(self.v_line)
         else:
-            try: self.setCursor(QCursor(Qt.ArrowCursor))
+            try: self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
             except Exception: pass
             self._remove_crosshair_lines()
             
     def fit_to_window(self):
         """Fit the image to the view"""
-        self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+        self.fitInView(self.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
         
     def setScene(self, scene):
         """Override to ensure crosshair lines are created when scene is set"""
@@ -269,7 +269,7 @@ class ImageViewerWidget(QWidget):
     
     # Signals
     mousePositionChanged = pyqtSignal(float, float)  # Image coordinates
-    mouseClicked = pyqtSignal(float, float, int)  # Image coordinates and button
+    mouseClicked = pyqtSignal(float, float, object)  # Image coordinates and Qt mouse button
     
     def __init__(self, parent=None):
         super().__init__(parent)

@@ -4,9 +4,10 @@
 
 [general]
 name=CrossSectionDigitizer
-qgisMinimumVersion=3.40
+qgisMinimumVersion=3.40.1
+qgisMaximumVersion=4.99
 description=Georeference geological cross-section images and digitize subsurface features into 3D geographic coordinates.
-version=0.1
+version=1.1.0
 author=Cascadia Regional Earthquake Science Center (CRESCENT)
 email=crescentcfm@cascadiaquakes.org
 
@@ -20,8 +21,7 @@ repository=https://github.com/cascadiaquakes/cross_section_digitizer
 # Recommended items:
 
 hasProcessingProvider=no
-# Uncomment the following line and add your changelog:
-# changelog=
+changelog=1.1.0: Add Qt6 and QGIS 4 compatibility while retaining QGIS 3.40.1 support. Load the icon directly without compiled Qt resources. Update the icon, documentation, metadata, and packaged license notices.
 
 # Tags are comma separated with spaces allowed
 tags=geology,cross sections,digitizing,georeferencing,faults,3D

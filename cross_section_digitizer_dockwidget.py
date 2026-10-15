@@ -29,14 +29,14 @@ import json
 
 from qgis.PyQt import QtWidgets, uic
 from qgis.PyQt.QtCore import pyqtSignal, Qt, QPointF
-from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox, QSplitter, QAction
-from qgis.PyQt.QtGui import QPixmap, QColor
+from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox, QSplitter
+from qgis.PyQt.QtGui import QAction, QPixmap, QColor
 from qgis.core import (QgsProject, QgsVectorLayer, QgsFeature, QgsGeometry, 
                        QgsLineString, QgsPolygon,
                        QgsPoint, QgsField, QgsFields, QgsCoordinateReferenceSystem,
-                       QgsCoordinateTransform, QgsPointXY, QgsMapLayerType)
+                       QgsCoordinateTransform, QgsPointXY, Qgis)
 from qgis.gui import QgsMapToolEmitPoint
-from qgis.PyQt.QtCore import QVariant
+from qgis.PyQt.QtCore import QMetaType
 
 # Import the new image viewer widget
 from .image_viewer_widget import ImageViewerWidget
@@ -98,7 +98,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.setupUi(self)
         
         # Set window flags to keep widget on top and visible
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         
         # Initialize variables
         self.image_path = None
@@ -128,7 +128,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         main_layout = self.dockWidgetContents.layout()
         
         # Create a splitter to allow resizing between viewer and controls
-        self.splitter = QSplitter(Qt.Vertical)
+        self.splitter = QSplitter(Qt.Orientation.Vertical)
         
         # Make the splitter handle more visible
         self.splitter.setHandleWidth(5)
@@ -159,7 +159,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         
     def update_splitter_style(self):
         """Update splitter style based on orientation"""
-        if self.splitter.orientation() == Qt.Vertical:
+        if self.splitter.orientation() == Qt.Orientation.Vertical:
             self.splitter.setStyleSheet("""
                 QSplitter::handle {
                     background-color: #d0d0d0;
@@ -203,9 +203,9 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         sizes = self.splitter.sizes()
         total = sum(sizes)
         
-        if self.splitter.orientation() == Qt.Vertical:
+        if self.splitter.orientation() == Qt.Orientation.Vertical:
             # Switch to horizontal (controls on right)
-            self.splitter.setOrientation(Qt.Horizontal)
+            self.splitter.setOrientation(Qt.Orientation.Horizontal)
             # Adjust sizes for horizontal layout - give more space to viewer
             if total > 0:
                 viewer_size = int(total * 0.75)  # 75% for viewer
@@ -213,7 +213,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                 self.splitter.setSizes([viewer_size, control_size])
         else:
             # Switch to vertical (controls on bottom)
-            self.splitter.setOrientation(Qt.Vertical)
+            self.splitter.setOrientation(Qt.Orientation.Vertical)
             # Adjust sizes for vertical layout
             if total > 0:
                 viewer_size = int(total * 0.80)  # 80% for viewer
@@ -224,7 +224,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.update_splitter_style()
         
         # Update button tooltip
-        if self.splitter.orientation() == Qt.Vertical:
+        if self.splitter.orientation() == Qt.Orientation.Vertical:
             self.action_toggle_orientation.setToolTip("Move control panel to right")
         else:
             self.action_toggle_orientation.setToolTip("Move control panel to bottom")
@@ -296,7 +296,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.iface.messageBar().pushMessage(
             "CrossSectionDigitizer", 
             f"Click on the image to set the {mode_names[mode]}", 
-            level=0, duration=3)
+            level=Qgis.MessageLevel.Info, duration=3)
             
     def start_plot_georef_mode(self, mode):
         """Start plot georeferencing point selection mode"""
@@ -317,7 +317,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.iface.messageBar().pushMessage(
             "CrossSectionDigitizer", 
             f"Click on the plot to set the cross-section {mode_names[mode]}", 
-            level=0, duration=3)
+            level=Qgis.MessageLevel.Info, duration=3)
             
     def clear_plot_georef_points(self):
         """Clear plot georeferencing points"""
@@ -328,11 +328,11 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.spin_end_plot_x.setValue(0)
         self.spin_end_plot_y.setValue(0)
         self.iface.messageBar().pushMessage(
-            "CrossSectionDigitizer", "Plot georeferencing points cleared", level=0, duration=2)
+            "CrossSectionDigitizer", "Plot georeferencing points cleared", level=Qgis.MessageLevel.Info, duration=2)
             
     def handle_image_click(self, x, y, button):
         """Handle clicks on the image"""
-        if button != Qt.LeftButton:
+        if button != Qt.MouseButton.LeftButton:
             return
             
         point = QPointF(x, y)
@@ -352,7 +352,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             self.iface.messageBar().pushMessage(
                 "CrossSectionDigitizer", 
                 mode_messages[self.digitizing_mode], 
-                level=0, duration=2)
+                level=Qgis.MessageLevel.Info, duration=2)
                 
             # Reset digitizing mode
             self.digitizing_mode = None
@@ -381,7 +381,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                 self.iface.messageBar().pushMessage(
                     "CrossSectionDigitizer", 
                     f"Cross-section {point_name} point set at ({plot_coords[0]:.3f}, {plot_coords[1]:.3f})", 
-                    level=0, duration=2)
+                    level=Qgis.MessageLevel.Info, duration=2)
                     
                 # Reset digitizing mode
                 self.digitizing_mode = None
@@ -527,7 +527,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.spin_y_ref.setValue(0)
 
         self.iface.messageBar().pushMessage(
-            "CrossSectionDigitizer", "Reference points cleared", level=0, duration=2)
+            "CrossSectionDigitizer", "Reference points cleared", level=Qgis.MessageLevel.Info, duration=2)
             
     def create_new_series(self):
         """Create a new data series"""
@@ -574,7 +574,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             self.iface.messageBar().pushMessage(
                 "CrossSectionDigitizer", 
                 "Click on points to digitize. Click 'Start Digitizing Points' again to stop.", 
-                level=0, duration=5)
+                level=Qgis.MessageLevel.Info, duration=5)
         else:
             # Stop digitizing
             self.digitizing_mode = None
@@ -584,7 +584,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             self.iface.messageBar().pushMessage(
                 "CrossSectionDigitizer", 
                 "Digitizing stopped.", 
-                level=0, duration=2)
+                level=Qgis.MessageLevel.Info, duration=2)
             
     def update_points_list(self):
         """Update the points list widget"""
@@ -653,11 +653,11 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         reply = QMessageBox.question(
             self, "Remove Series", 
             f"Are you sure you want to remove series '{self.current_series}'?\n\nThis will remove the series from the dropdown.\nThis action cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
         )
         
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             series_to_clear = self.current_series
             
             # Clear visual markers for this series
@@ -738,8 +738,8 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         
         # Add fields
         fields = QgsFields()
-        fields.append(QgsField("name", QVariant.String))
-        fields.append(QgsField("image_path", QVariant.String))
+        fields.append(QgsField("name", QMetaType.Type.QString))
+        fields.append(QgsField("image_path", QMetaType.Type.QString))
         provider.addAttributes(fields)
         layer.updateFields()
         
@@ -757,7 +757,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         #pt_layer = QgsVectorLayer("PointZ?crs=EPSG:4326", "Image Corners", "memory")
         #pt_provider = pt_layer.dataProvider()
         #pt_fields = QgsFields()
-        #pt_fields.append(QgsField("position", QVariant.String))
+        #pt_fields.append(QgsField("position", QMetaType.Type.QString))
         #pt_provider.addAttributes(pt_fields)
         #pt_layer.updateFields()
 
@@ -830,7 +830,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             # Check if layer already exists in the project
             existing_layer = None
             for layer in QgsProject.instance().mapLayers().values():
-                if layer.name() == layer_name and layer.type() == QgsMapLayerType.VectorLayer:
+                if layer.name() == layer_name and layer.type() == Qgis.LayerType.Vector:
                     existing_layer = layer
                     break
             
@@ -850,8 +850,8 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                 
                 # Add fields for new layers
                 fields = QgsFields()
-                fields.append(QgsField("series", QVariant.String))
-                fields.append(QgsField("point_id", QVariant.Int))
+                fields.append(QgsField("series", QMetaType.Type.QString))
+                fields.append(QgsField("point_id", QMetaType.Type.Int))
                 provider.addAttributes(fields)
                 layer.updateFields()
                 created_layers.append(series_name)
@@ -1149,10 +1149,10 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                         f"Map is using {map_crs.authid()}, not WGS84.\n\n"
                         "Coordinates will be automatically transformed to WGS84 lat/lon.\n\n"
                         "Continue with map clicking?",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.Yes
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes
                     )
-                    if reply != QMessageBox.Yes:
+                    if reply != QMessageBox.StandardButton.Yes:
                         return
             
             # Store previous map tool to restore later
@@ -1178,7 +1178,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             self.iface.messageBar().pushMessage(
                 "Cross Section Digitizer", 
                 f"Click on the map to set {point_type} point geographic coordinates. Press Escape to cancel.",
-                level=0,  # Info level
+                level=Qgis.MessageLevel.Info,  # Info level
                 duration=5
             )
             
@@ -1213,7 +1213,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                 self.iface.messageBar().pushMessage(
                     "Cross Section Digitizer",
                     f"Start point set to: {lon:.6f}, {lat:.6f}",
-                    level=3,  # Success level
+                    level=Qgis.MessageLevel.Success,  # Success level
                     duration=3
                 )
             else:  # end
@@ -1222,7 +1222,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                 self.iface.messageBar().pushMessage(
                     "Cross Section Digitizer",
                     f"End point set to: {lon:.6f}, {lat:.6f}",
-                    level=3,  # Success level
+                    level=Qgis.MessageLevel.Success,  # Success level
                     duration=3
                 )
                 
@@ -1363,11 +1363,11 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             reply = QMessageBox.question(
                 self, "Load Project", 
                 "Loading a project will replace all current data.\n\nDo you want to continue?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
             )
             
-            if reply != QMessageBox.Yes:
+            if reply != QMessageBox.StandardButton.Yes:
                 return
             
             # Load image
@@ -1502,10 +1502,10 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             "• Georeferencing information\n\n"
             "Are you sure you want to continue?\n\n"
             "This action cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
         )
-        if reply != QMessageBox.Yes:
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
         iv = getattr(self, "image_viewer", None)
@@ -1667,10 +1667,10 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                         f"The map is currently in {map_crs.authid()}, not WGS84.\n"
                         f"Coordinates will be automatically transformed to WGS84.\n\n"
                         f"Continue with map clicking?",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.Yes
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes
                     )
-                    if reply != QMessageBox.Yes:
+                    if reply != QMessageBox.StandardButton.Yes:
                         return
             
             # Store the current map tool to restore later
@@ -1688,7 +1688,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                         self.iface.messageBar().pushMessage(
                             "CrossSectionDigitizer", 
                             f"Start point set to: {lon:.6f}, {lat:.6f}", 
-                            level=3, duration=3
+                            level=Qgis.MessageLevel.Success, duration=3
                         )
                     elif point_type == 'end':
                         self.spin_end_lon.setValue(lon)
@@ -1696,7 +1696,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                         self.iface.messageBar().pushMessage(
                             "CrossSectionDigitizer", 
                             f"End point set to: {lon:.6f}, {lat:.6f}", 
-                            level=3, duration=3
+                            level=Qgis.MessageLevel.Success, duration=3
                         )
                 
                 # Restore the previous map tool
@@ -1715,7 +1715,7 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             self.iface.messageBar().pushMessage(
                 "CrossSectionDigitizer", 
                 f"Click on the map to set the {point_name} point coordinates. Press Escape to cancel.", 
-                level=0, duration=5
+                level=Qgis.MessageLevel.Info, duration=5
             )
             
         except Exception as e:

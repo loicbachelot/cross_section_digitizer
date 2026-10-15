@@ -12,6 +12,9 @@ data can be saved to JSON and restored in a later session.
 
 ## Installation
 
+Version 1.1.0 supports QGIS 3.40.1 through QGIS 4.x. Integration checks have
+passed on QGIS 3.40.1 with Qt5 and QGIS 4.2.3 with Qt6.
+
 Download the plugin ZIP from the
 [GitHub releases page](https://github.com/cascadiaquakes/cross_section_digitizer/releases).
 In QGIS, open **Plugins > Manage and Install Plugins > Install from ZIP**, select
@@ -59,6 +62,14 @@ georeferencing functions.
 - [Source code](https://github.com/cascadiaquakes/cross_section_digitizer)
 - [Report an issue](https://github.com/cascadiaquakes/cross_section_digitizer/issues)
 - Contact: crescentcfm@cascadiaquakes.org
+
+## Releases
+
+The current version is 1.1.0. Release tags use the matching `v1.1.0` format.
+Before creating a release, update `version` and `changelog` in `metadata.txt`
+and the version references in this README. The documentation reads its version
+from the metadata automatically. The release workflow checks that the tag matches
+the metadata before building and attaching the plugin ZIP.
 
 ## Licensing
 
