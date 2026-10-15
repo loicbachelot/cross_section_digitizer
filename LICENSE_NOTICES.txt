@@ -1,0 +1,78 @@
+CrossSectionDigitizer licensing and attribution
+==============================================
+
+Original contributions
+----------------------
+
+Original CRESCENT contributions are licensed under the BSD 3-Clause License in
+LICENSE.md, except where a file carries a different license notice. Retain the
+BSD copyright notice, conditions, and disclaimer when redistributing that code.
+The repository-level BSD license does not override file-specific licenses or
+grant rights to third-party code beyond those provided by its authors.
+
+Existing file-specific notices
+-----------------------------
+
+The following Plugin Builder-derived files retain notices granting use under
+GNU GPL version 2 or, at your option, any later version:
+
+  __init__.py
+  cross_section_digitizer.py
+  cross_section_digitizer_dockwidget.py
+  Makefile
+  pb_tool.cfg
+
+The following test files also retain GPL version 2-or-later notices:
+
+  test/qgis_interface.py
+  test/test_cross_section_digitizer_dockwidget.py
+  test/test_qgis_environment.py
+  test/test_resources.py
+  test/test_translations.py
+
+test/test_init.py carries a GPL designation without an explicit version.
+Its existing designation is preserved, without asserting a different version.
+
+Plugin Builder provenance is recorded in the generated source headers:
+https://github.com/g-sherman/Qgis-Plugin-Builder
+
+Third-party test notices identify Ivan Mincik, German Carrillo, Tim Sutton,
+and the Australia Indonesia Facility for Disaster Reduction. Preserve the
+copyright and author notices in those files. The test raster's provenance is
+recorded separately in test/tenbytenraster.lic; that file is not a BSD grant.
+Other inherited support files retain their existing attribution; this note
+does not assign them a new license.
+
+COPYING.GPL-2.0.txt and COPYING.GPL-3.0.txt contain the unmodified GNU license
+texts, obtained from:
+https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
+https://www.gnu.org/licenses/gpl-3.0.txt
+
+Installed dependencies and combined works
+----------------------------------------
+
+QGIS and PyQt are installed separately and are not bundled in the plugin ZIP.
+QGIS is licensed under GPL version 2 or later. Riverbank offers the open-source
+versions of PyQt5 and PyQt6 under GPLv3, with a separate commercial license as an
+alternative. Qt has its own licensing terms, distinct from PyQt's.
+
+BSD 3-Clause permits combination with GPL-covered code, provided the BSD
+notices are retained and the applicable GPL obligations are met. Importing
+QGIS or PyQt does not relicense those dependencies under BSD, and distributing
+them separately does not by itself remove obligations for a combined work.
+GPLv2-or-later notices permit selection of GPLv3 for a combination requiring it.
+This does not change the BSD grant on independently reusable original code.
+
+References:
+https://plugins.qgis.org/docs/publish
+https://www.gnu.org/licenses/license-compatibility.en.html
+https://www.gnu.org/licenses/gpl-faq.en.html#IfInterpreterIsGPL
+https://www.riverbankcomputing.com/software/pyqt
+https://www.riverbankcomputing.com/commercial/license-faq
+
+Release contents
+----------------
+
+Release packages include this notice, LICENSE.md, both GNU license texts, and
+README.md, alongside the source files and their existing notices. These texts
+document the applicable grants; their inclusion does not relicense files.

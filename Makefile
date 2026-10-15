@@ -48,7 +48,7 @@ PY_FILES = \
 
 UI_FILES = cross_section_digitizer_dockwidget_base.ui
 
-EXTRAS = metadata.txt icon.png
+EXTRAS = metadata.txt icon.png README.md LICENSE.md LICENSE_NOTICES.txt COPYING.GPL-2.0.txt COPYING.GPL-3.0.txt
 
 EXTRA_DIRS =
 
