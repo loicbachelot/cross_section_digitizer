@@ -1,0 +1,30 @@
+name: QGIS Integration Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: QGIS with Qt ${{ matrix.qt }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: qgis/qgis:ltr-noble
+            qt: 5
+          - image: qgis/qgis:stable-trixie
+            qt: 6
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run project and Qt integration tests
+        run: python3 scripts/run_integration_tests.py --expected-qt-major ${{ matrix.qt }}

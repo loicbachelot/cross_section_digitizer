@@ -1369,17 +1369,24 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             
             if reply != QMessageBox.StandardButton.Yes:
                 return
-            
-            # Load image
+
+            # Check the image before replacing any current session data.
             image_info = project_data.get("image")
             if image_info and image_info.get("path"):
                 image_path = image_info["path"]
-                if os.path.exists(image_path):
-                    self.load_image_file(image_path)
-                    loaded_items.append("image")
-                else:
+                if not os.path.exists(image_path):
                     QMessageBox.warning(self, "Missing File", f"Image file not found: {image_path}")
-            
+                    return
+                if QPixmap(image_path).isNull():
+                    QMessageBox.warning(self, "Invalid Image", f"Failed to load image: {image_path}")
+                    return
+
+            self._reset_project_state()
+            if image_info and image_info.get("path"):
+                if not self.load_image_file(image_path):
+                    raise ValueError(f"Failed to load image: {image_path}")
+                loaded_items.append("image")
+
             # Load coordinate system (reference points)
             coord_system = project_data.get("coordinate_system")
             if coord_system and coord_system.get("reference_points"):
@@ -1508,125 +1515,43 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        iv = getattr(self, "image_viewer", None)
+        self._reset_project_state()
+        QMessageBox.information(self, "Success", "Project cleared successfully!")
 
-        # Pre-disable digitizing and disconnect click signal to prevent events during teardown
-        if iv is not None:
-            # 1) Disable the mode (no signals)
-            try:
-                iv.set_digitize_mode(False)
-            except Exception:
-                pass
-            
-            # 2) Make the action reflect the state, without emitting toggled()
-            try:
-                act = iv.action_digitize
-                act.blockSignals(True)
-                act.setChecked(False)
-                act.blockSignals(False)
-            except Exception:
-                pass
-            
-            # 3) Prevent any clicks from coming through during teardown
-            try:
-                iv.mouseClicked.disconnect(self.handle_image_click)
-            except Exception:
-                pass
-            
-        self.blockSignals(True)
-        try:
-            # Image path + label
-            self.image_path = None
-            self.label_image_path.setText("No image loaded")
+    def _reset_project_state(self):
+        """Clear a session before replacing it, preserving UI signal connections."""
+        viewer = self.image_viewer
+        # Remove crosshairs before clearing their owning scene.
+        viewer.toggle_digitize_mode(False)
+        viewer.action_digitize.setChecked(False)
+        viewer.toggle_pan_mode(False)
+        viewer.action_pan.setChecked(False)
+        viewer.view._pan_start_pos = None
+        viewer.scene.clear()
+        viewer.reference_markers.clear()
+        viewer.series_markers.clear()
+        viewer.georef_markers.clear()
+        viewer.image_item = None
+        viewer.image_pixmap = None
+        viewer.set_coordinate_transform_callback(None)
 
-            # Clear the graphics scene and viewer-side state
-            if iv is not None:
-                sc = None
-                try:
-                    sc = iv.scene if hasattr(iv, "scene") else None
-                except Exception:
-                    sc = None
-                if sc is not None:
-                    try:
-                        sc.clear()
-                    except Exception:
-                        pass
-
-                for attr in ("reference_markers", "series_markers", "georef_markers"):
-                    if hasattr(iv, attr):
-                        try:
-                            getattr(iv, attr).clear()
-                        except Exception:
-                            # Reset to empty if it's become unusable
-                            setattr(iv, attr, {} if attr != "georef_markers" else [])
-
-                iv.image_item = None
-                iv.image_pixmap = None
-                try:
-                    iv.set_coordinate_transform_callback(None)
-                except Exception:
-                    pass
-
-            # Reference points (model side)
-            if hasattr(self, "reference_points"):
-                try:
-                    self.reference_points.clear()
-                except Exception:
-                    self.reference_points = {}
-
-            # Reset reference/plot UI values
-            self.spin_origin_x.setValue(0.0)
-            self.spin_origin_y.setValue(0.0)
-            self.spin_x_ref.setValue(0.0)
-            self.spin_y_ref.setValue(0.0)
-
-            if hasattr(self, "plot_georef_points"):
-                try:
-                    self.plot_georef_points.clear()
-                except Exception:
-                    self.plot_georef_points = []
-
-            self.spin_start_plot_x.setValue(0.0)
-            self.spin_start_plot_y.setValue(0.0)
-            self.spin_end_plot_x.setValue(0.0)
-            self.spin_end_plot_y.setValue(0.0)
-
-            self.spin_start_lon.setValue(0.0)
-            self.spin_start_lat.setValue(0.0)
-            self.spin_start_elev.setValue(0.0)
-            self.spin_end_lon.setValue(0.0)
-            self.spin_end_lat.setValue(0.0)
-            self.spin_end_elev.setValue(0.0)
-
-            # Data series + UI lists
-            if hasattr(self, "data_series"):
-                try:
-                    self.data_series.clear()
-                except Exception:
-                    self.data_series = {}
-
-            self.current_series = None
-            try:
-                self.combo_series.clear()
-            except Exception:
-                pass
-            try:
-                self.list_points.clear()
-            except Exception:
-                pass
-
-                
-            try:
-                self.btn_digitize_points.setChecked(False)
-            except Exception:
-                pass
-
-            QMessageBox.information(self, "Success", "Project cleared successfully!")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to clear project: {str(e)}")
-        finally:
-            self.blockSignals(False)
+        self.image_path = None
+        self.label_image_path.setText("No image loaded")
+        self.reference_points.clear()
+        self.plot_georef_points.clear()
+        self.data_series.clear()
+        self.current_series = None
+        self.digitizing_mode = None
+        self.combo_series.clear()
+        self.list_points.clear()
+        self.btn_digitize_points.setChecked(False)
+        for spinbox in (
+                self.spin_origin_x, self.spin_origin_y, self.spin_x_ref, self.spin_y_ref,
+                self.spin_start_plot_x, self.spin_start_plot_y,
+                self.spin_end_plot_x, self.spin_end_plot_y,
+                self.spin_start_lon, self.spin_start_lat, self.spin_start_elev,
+                self.spin_end_lon, self.spin_end_lat, self.spin_end_elev):
+            spinbox.setValue(0)
 
 
     def activate_start_geo_tool(self):
@@ -1731,7 +1656,8 @@ class CrossSectionDigitizerDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
                 self.label_image_path.setText(f"Loaded: {layer_name}")
                 
                 # Set up coordinate transformation callback
-                self.image_viewer.set_coordinate_transform_callback(self.pixel_to_plot_coords)
+                self.image_viewer.set_coordinate_transform_callback(
+                    self.pixel_to_plot_coords if len(self.reference_points) == 3 else None)
                 return True
         return False
 

@@ -71,6 +71,14 @@ and the version references in this README. The documentation reads its version
 from the metadata automatically. The release workflow checks that the tag matches
 the metadata before building and attaching the plugin ZIP.
 
+## Testing
+
+Run `python3 scripts/run_integration_tests.py` with QGIS-configured Python, or
+pass `--qgis-app /path/to/QGIS.app` on macOS. The integration suite uses a
+portable saved cross-section project to check loading, saving, digitizing,
+coordinate transforms, and generated layers. See [test/README.md](test/README.md)
+for runtime setup, fixture details, and automated checks on GitHub.
+
 ## Licensing
 
 Original CRESCENT contributions are available under the
