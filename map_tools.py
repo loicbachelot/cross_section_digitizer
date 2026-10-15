@@ -22,7 +22,7 @@ class DigitizeMapTool(QgsMapToolEmitPoint):
         
     def canvasPressEvent(self, event):
         """Handle canvas press events"""
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             point = self.toMapCoordinates(event.pos())
             self.add_point(point)
             self.callback(point)
@@ -84,7 +84,7 @@ class ReferencePointTool(QgsMapToolEmitPoint):
         
     def canvasPressEvent(self, event):
         """Handle canvas press events"""
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             point = self.toMapCoordinates(event.pos())
             self.set_reference_point(point)
             self.callback(point, self.point_type)

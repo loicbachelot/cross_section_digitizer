@@ -13,6 +13,7 @@ __date__ = '2025-06-18'
 __copyright__ = 'Copyright 2025, Cascadia Regional Earthquake Science Center (CRESCENT)'
 
 import unittest
+from pathlib import Path
 
 from qgis.PyQt.QtGui import QIcon
 
@@ -31,14 +32,12 @@ class CrossSectionDigitizerDialogTest(unittest.TestCase):
 
     def test_icon_png(self):
         """Test we can click OK."""
-        path = ':/plugins/CrossSectionDigitizer/icon.png'
-        icon = QIcon(path)
+        path = Path(__file__).resolve().parents[1] / 'icon.png'
+        icon = QIcon(str(path))
         self.assertFalse(icon.isNull())
 
 if __name__ == "__main__":
-    suite = unittest.makeSuite(CrossSectionDigitizerResourcesTest)
-    runner = unittest.TextTestRunner(verbosity=2)
-    runner.run(suite)
+    unittest.main()
 
 
 

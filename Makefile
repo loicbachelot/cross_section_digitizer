@@ -44,17 +44,16 @@ PLUGINNAME = cross_section_digitizer
 
 PY_FILES = \
 	__init__.py \
-	cross_section_digitizer.py cross_section_digitizer_dockwidget.py
+	cross_section_digitizer.py cross_section_digitizer_dockwidget.py \
+	image_viewer_widget.py map_tools.py
 
 UI_FILES = cross_section_digitizer_dockwidget_base.ui
 
-EXTRAS = metadata.txt icon.png
+EXTRAS = metadata.txt icon.png README.md LICENSE.md LICENSE_NOTICES.txt COPYING.GPL-2.0.txt COPYING.GPL-3.0.txt
 
 EXTRA_DIRS =
 
-COMPILED_RESOURCE_FILES = resources.py
-
-PEP8EXCLUDE=pydev,resources.py,conf.py,third_party,ui
+PEP8EXCLUDE=pydev,conf.py,third_party,ui
 
 # QGISDIR points to the location where your plugin should be installed.
 # This varies by platform, relative to your HOME directory:
@@ -75,8 +74,6 @@ HELP = help/build/html
 
 PLUGIN_UPLOAD = $(c)/plugin_upload.py
 
-RESOURCE_SRC=$(shell grep '^ *<file' resources.qrc | sed 's@</file>@@g;s/.*>//g' | tr '\n' ' ')
-
 .PHONY: default
 default:
 	@echo While you can use make to build and deploy your plugin, pb_tool
@@ -86,31 +83,19 @@ default:
 	@echo You can install pb_tool using: pip install pb_tool
 	@echo See https://g-sherman.github.io/plugin_build_tool/ for info. 
 
-compile: $(COMPILED_RESOURCE_FILES)
-
-%.py : %.qrc $(RESOURCES_SRC)
-	pyrcc5 -o $*.py  $<
+.PHONY: compile
+compile:
+	@echo "No Qt resource compilation needed; icons are loaded from files."
 
 %.qm : %.ts
 	$(LRELEASE) $<
 
-test: compile transcompile
-	@echo
-	@echo "----------------------"
-	@echo "Regression Test Suite"
-	@echo "----------------------"
+QGIS_PYTHON ?= python3
+TEST_ARGS ?=
 
-	@# Preceding dash means that make will continue in case of errors
-	@-export PYTHONPATH=`pwd`:$(PYTHONPATH); \
-		export QGIS_DEBUG=0; \
-		export QGIS_LOG_FILE=/dev/null; \
-		nosetests -v --with-id --with-coverage --cover-package=. \
-		3>&1 1>&2 2>&3 3>&- || true
-	@echo "----------------------"
-	@echo "If you get a 'no module named qgis.core error, try sourcing"
-	@echo "the helper script we have provided first then run make test."
-	@echo "e.g. source run-env-linux.sh <path to qgis install>; make test"
-	@echo "----------------------"
+.PHONY: test
+test:
+	$(QGIS_PYTHON) scripts/run_integration_tests.py $(TEST_ARGS)
 
 deploy: compile doc transcompile
 	@echo
@@ -123,7 +108,6 @@ deploy: compile doc transcompile
 	mkdir -p $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)
 	cp -vf $(PY_FILES) $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)
 	cp -vf $(UI_FILES) $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)
-	cp -vf $(COMPILED_RESOURCE_FILES) $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)
 	cp -vf $(EXTRAS) $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)
 	cp -vfr i18n $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)
 	cp -vfr $(HELP) $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)/help
@@ -208,7 +192,7 @@ clean:
 	@echo "------------------------------------"
 	@echo "Removing uic and rcc generated files"
 	@echo "------------------------------------"
-	rm $(COMPILED_UI_FILES) $(COMPILED_RESOURCE_FILES)
+	$(if $(strip $(COMPILED_UI_FILES)),rm -f $(COMPILED_UI_FILES),@echo No generated UI files to remove.)
 
 doc:
 	@echo

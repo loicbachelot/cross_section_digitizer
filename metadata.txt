@@ -1,32 +1,33 @@
 # This file contains metadata for your plugin.
 
-# This file should be included when you package your plugin.# Mandatory items:
+# Include this file when packaging the plugin.
 
 [general]
 name=CrossSectionDigitizer
-qgisMinimumVersion=3.0
-description=digitizer and georeferencer for 1D and 2D subsurface data 
-version=0.1
+qgisMinimumVersion=3.40.1
+qgisMaximumVersion=4.99
+description=Georeference geological cross-section images and digitize subsurface features into 3D geographic coordinates.
+version=1.1.0
 author=Cascadia Regional Earthquake Science Center (CRESCENT)
 email=crescentcfm@cascadiaquakes.org
 
-about=plotz
+about=CrossSectionDigitizer extracts spatial data from geological cross-sections, depth-migrated seismic sections, and other vertical images. Define image-to-section control points, tie the section to geographic locations, and digitize faults, horizons, or other features. Export digitized series as CSV or georeferenced 3D point layers, create a 3D polygon representing the image extent, and save project settings and digitized data as JSON.
+    Developed as part of CRESCENT's tools for constructing complex 3D fault geometries. A modified Qgis2threejs plugin supports visualization of the georeferenced images, while Contours2Mesh supports subsequent fault-surface construction. These companion plugins are optional and are not required for digitizing or georeferencing. No additional Python packages beyond the QGIS Python environment are required.
 
-tracker=http://bugs
-repository=http://repo
+tracker=https://github.com/cascadiaquakes/cross_section_digitizer/issues
+repository=https://github.com/cascadiaquakes/cross_section_digitizer
 # End of mandatory metadata
 
 # Recommended items:
 
 hasProcessingProvider=no
-# Uncomment the following line and add your changelog:
-# changelog=
+changelog=1.1.0: Add Qt6 and QGIS 4 compatibility while retaining QGIS 3.40.1 support. Load the icon directly without compiled Qt resources. Update the icon, documentation, metadata, and packaged license notices.
 
 # Tags are comma separated with spaces allowed
-tags=python
+tags=geology,cross sections,digitizing,georeferencing,faults,3D
 
-homepage=http://homepage
-category=Plugins
+homepage=https://cascadiaquakes.github.io/fault-geometry-building-tutorial/QGIS_plugin.html
+category=Vector
 icon=icon.png
 # experimental flag
 experimental=False
@@ -38,9 +39,6 @@ deprecated=False
 # (or upgraded) can be specified.
 # Check the documentation for more information.
 # plugin_dependencies=
-
-Category of the plugin: Raster, Vector, Database or Web
-# category=
 
 # If the plugin can run on QGIS Server.
 server=False

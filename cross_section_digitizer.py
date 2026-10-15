@@ -21,11 +21,8 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
-from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction
-# Initialize Qt resources from file resources.py
-from .resources import *
+from qgis.PyQt.QtCore import QLocale, QSettings, QTranslator, QCoreApplication, Qt
+from qgis.PyQt.QtGui import QAction, QIcon
 
 # Import the code for the DockWidget
 from .cross_section_digitizer_dockwidget import CrossSectionDigitizerDockWidget
@@ -50,7 +47,7 @@ class CrossSectionDigitizer:
         self.plugin_dir = os.path.dirname(__file__)
 
         # initialize locale
-        locale = QSettings().value('locale/userLocale')[0:2]
+        locale = (QSettings().value('locale/userLocale') or QLocale.system().name())[0:2]
         locale_path = os.path.join(
             self.plugin_dir,
             'i18n',
@@ -164,7 +161,7 @@ class CrossSectionDigitizer:
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
 
-        icon_path = ':/plugins/cross_section_digitizer/icon.png'
+        icon_path = os.path.join(self.plugin_dir, 'icon.png')
         self.add_action(
             icon_path,
             text=self.tr(u'Cross Section Digitizer'),
@@ -219,7 +216,7 @@ class CrossSectionDigitizer:
             self.dockwidget.closingPlugin.connect(self.onClosePlugin)
 
             # show the dockwidget
-            self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dockwidget)
+            self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dockwidget)
             self.dockwidget.show()
         else:
             # Toggle visibility if already active
