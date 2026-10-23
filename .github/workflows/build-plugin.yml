@@ -14,12 +14,12 @@ jobs:
 
     steps:
     - name: Check out the code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: '3.12'
 
     - name: Check release version
       env:
@@ -29,7 +29,7 @@ jobs:
     - name: Install pb_tool and zip
       run: |
         python -m pip install --upgrade pip
-        pip install pb_tool
+        pip install "pb_tool>=3.4.0"
         sudo apt-get update && sudo apt-get install -y zip
 
     - name: Build plugin with pb_tool
